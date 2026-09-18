@@ -161,7 +161,7 @@ Everything lives in one folder, which Settings will show you:
 | Linux | `~/.local/share/MieSQL` |
 
 `connections.json` holds profiles and never passwords, and is written `0600` on Unix.
-Passwords live in the OS credential store under the service `app.miesql.connections`,
+Passwords live in the OS credential store under the service `com.mdenizay.miesql`,
 keyed by a per-connection UUID; deleting a connection deletes its entry.
 
 There is no analytics and no crash reporting. The update check is the only outbound

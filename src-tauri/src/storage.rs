@@ -72,7 +72,7 @@ pub fn save_profiles(profiles: &[ConnectionProfile]) -> DbResult<()> {
 
 // MARK: - Credentials
 
-const CREDENTIAL_SERVICE: &str = "app.miesql.connections";
+const CREDENTIAL_SERVICE: &str = "com.mdenizay.miesql";
 
 /// Writes a password, healing the case where an item already exists under a different
 /// code signature.
