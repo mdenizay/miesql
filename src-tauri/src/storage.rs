@@ -115,11 +115,41 @@ pub fn delete_password(account: &str) {
     }
 }
 
+/// True when the OS has somewhere to put a password at all.
+///
+/// A headless Linux box, or a desktop with no keyring daemon running, has no Secret
+/// Service — so "save password" is a promise the app cannot keep there, and it is better
+/// to say so than to fail at the moment someone tries.
+pub fn credential_store_available() -> bool {
+    let probe = "miesql-availability-probe";
+    match keyring::Entry::new(CREDENTIAL_SERVICE, probe) {
+        Ok(entry) => {
+            let ok = entry.set_password("probe").is_ok();
+            if ok {
+                let _ = entry.delete_credential();
+            }
+            ok
+        }
+        Err(_) => false,
+    }
+}
+
 fn credential_error(action: &str, error: &keyring::Error) -> DbError {
+    let detail = format!("{error}\n{error:?}");
+    // The Secret Service being absent is not a failure the user can debug from a DBus
+    // message; it is a missing component with a known fix.
+    if detail.contains("org.freedesktop.secrets") || detail.contains("ServiceUnknown") {
+        return DbError::new("No credential store is available, so the password cannot be saved.")
+            .with_detail(
+                "Linux keeps passwords in the Secret Service. Install and start \
+                 gnome-keyring or KWallet, or clear \"Save password\" and enter the \
+                 password each time.",
+            );
+    }
     DbError::new(format!("Could not {action}."))
         // keyring's Display collapses every platform failure into one sentence, which
         // leaves nothing to act on; the Debug form carries the OS status code.
-        .with_detail(format!("{error}\n{error:?}"))
+        .with_detail(detail)
 }
 
 // MARK: - Settings

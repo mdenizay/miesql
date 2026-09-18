@@ -333,6 +333,12 @@ async fn postgres_reports_server_errors_with_their_sqlstate() {
 /// one. The write has to heal itself rather than surfacing an opaque platform error.
 #[test]
 fn saving_a_password_twice_overwrites_it() {
+    // A headless machine has no Secret Service to write to. Skipping keeps the suite
+    // runnable there; CI starts a real keyring so this path is still covered on Linux.
+    if !miesql_lib::storage::credential_store_available() {
+        eprintln!("skipping: no credential store on this machine");
+        return;
+    }
     let account = format!("miesql-test-{}", uuid::Uuid::new_v4());
 
     miesql_lib::storage::save_password(&account, "first").expect("first write");

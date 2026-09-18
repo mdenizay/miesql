@@ -52,6 +52,7 @@ pub fn run() {
             commands::clear_history,
             commands::get_snippets,
             commands::set_snippets,
+            commands::credential_store_available,
             commands::data_directory,
         ])
         .run(tauri::generate_context!())

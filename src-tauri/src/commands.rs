@@ -299,6 +299,13 @@ pub fn set_snippets(snippets: Vec<storage::Snippet>) -> R<()> {
     storage::save_snippets(&snippets)
 }
 
+/// Whether this machine can store a password at all, so the connection editor can warn
+/// instead of letting someone tick "Save password" and discover later that it did nothing.
+#[tauri::command]
+pub fn credential_store_available() -> bool {
+    storage::credential_store_available()
+}
+
 /// Where everything is kept, shown in Settings so the privacy claim is checkable.
 #[tauri::command]
 pub fn data_directory() -> String {
