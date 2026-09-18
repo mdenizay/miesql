@@ -6,7 +6,7 @@ import { autocompletion, completionKeymap, type CompletionSource } from "@codemi
 import { sql, PostgreSQL, MySQL, SQLite, type SQLDialect } from "@codemirror/lang-sql";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
-import type { DatabaseKind } from "../lib/types";
+import { isRelational, type DatabaseKind } from "../lib/types";
 
 interface Props {
   value: string;
@@ -36,6 +36,13 @@ const highlightStyle = HighlightStyle.define([
   { tag: tags.variableName, color: "var(--text)" },
   { tag: tags.quote, color: "var(--sql-identifier)" },
 ]);
+
+/** Redis commands are not SQL, and highlighting them as if they were is worse than
+ *  leaving them plain — SET and GET would come out looking like keywords they are not. */
+function languageFor(kind: DatabaseKind, schema: Record<string, string[]>) {
+  if (!isRelational(kind)) return [];
+  return sql({ dialect: dialectFor(kind), schema });
+}
 
 function dialectFor(kind: DatabaseKind): SQLDialect {
   switch (kind) {
@@ -79,7 +86,7 @@ export function SqlEditor(props: Props) {
           ...historyKeymap,
           ...completionKeymap,
         ]),
-        language.current.of(sql({ dialect: dialectFor(props.kind), schema: props.schema })),
+        language.current.of(languageFor(props.kind, props.schema)),
         theme.current.of(EditorView.theme({ "&": { fontSize: `${props.fontSize}px` } })),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) props.onChange(update.state.doc.toString());
@@ -99,9 +106,7 @@ export function SqlEditor(props: Props) {
   // Swap the dialect and completion schema when the connection changes.
   useEffect(() => {
     view.current?.dispatch({
-      effects: language.current.reconfigure(
-        sql({ dialect: dialectFor(props.kind), schema: props.schema }),
-      ),
+      effects: language.current.reconfigure(languageFor(props.kind, props.schema)),
     });
   }, [props.kind, props.schema]);
 

@@ -6,6 +6,7 @@
 
 pub mod mysql;
 pub mod postgres;
+pub mod redis;
 pub mod sqlite;
 
 use crate::error::{DbError, DbResult};
@@ -97,6 +98,7 @@ pub fn make_driver(credentials: Credentials) -> DbResult<Box<dyn Driver>> {
             Ok(Box::new(mysql::MySqlDriver::new(credentials)))
         }
         DatabaseKind::Sqlite => Ok(Box::new(sqlite::SqliteDriver::new(credentials))),
+        DatabaseKind::Redis => Ok(Box::new(redis::RedisDriver::new(credentials))),
         other => Err(DbError::new(format!(
             "{} support is not implemented yet.",
             other.display_name()

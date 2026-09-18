@@ -522,3 +522,127 @@ async fn mysql_reports_server_errors_and_honours_read_only() {
     assert_eq!(blocked.code.as_deref(), Some("MIESQL_READONLY"));
     guarded.disconnect().await;
 }
+
+// MARK: - Redis
+
+/// Skipped unless MIESQL_TEST_REDIS_URL is set. The tests write only under their own key
+/// prefix and delete it afterwards, so pointing this at a populated server is safe.
+fn redis_credentials() -> Option<Credentials> {
+    let url = std::env::var("MIESQL_TEST_REDIS_URL").ok()?;
+    let parsed = miesql_lib::connection_url::parse(&url).ok()?;
+    Some(Credentials::new(parsed.profile, parsed.password))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn redis_browses_a_keyspace() {
+    let Some(credentials) = redis_credentials() else {
+        eprintln!("skipping: MIESQL_TEST_REDIS_URL is not set");
+        return;
+    };
+    let database = format!("db{}", credentials.profile.database);
+    let mut driver = make_driver(credentials).unwrap();
+
+    let info = driver.connect().await.expect("connect");
+    assert_eq!(info.product_name, "Redis");
+    assert!(!info.version.is_empty());
+
+    // A prefix of our own, so this is safe against a server holding real data.
+    let ns = format!("miesqltest{}", std::process::id());
+    driver
+        .execute(&format!(
+            "SET {ns}:user:1 Ada\nSET {ns}:user:2 Grace\nHSET {ns}:cfg theme dark lang en\nRPUSH {ns}:queue a b c\nEXPIRE {ns}:user:2 600"
+        ))
+        .await
+        .expect("seed");
+
+    // The namespace shows up in the tree.
+    let tables = driver.list_tables(&database, "").await.unwrap();
+    assert!(
+        tables.iter().any(|t| t.name == ns),
+        "namespace {ns} missing from {:?}",
+        tables.iter().map(|t| &t.name).collect::<Vec<_>>()
+    );
+
+    let table = tables.into_iter().find(|t| t.name == ns).unwrap();
+    assert_eq!(table.kind, TableKind::Collection);
+
+    let page = driver.fetch_rows(&table, "", &[], 50, 0).await.unwrap();
+    assert_eq!(
+        page.columns
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["key", "type", "ttl", "value"]
+    );
+    assert_eq!(page.rows.len(), 4);
+
+    let row_for = |key: &str| {
+        page.rows
+            .iter()
+            .find(|r| r.values[0].as_str() == key)
+            .unwrap_or_else(|| panic!("no row for {key}"))
+    };
+    assert_eq!(
+        row_for(&format!("{ns}:user:1")).values[1].as_str(),
+        "string"
+    );
+    assert_eq!(row_for(&format!("{ns}:cfg")).values[1].as_str(), "hash");
+    assert_eq!(row_for(&format!("{ns}:queue")).values[1].as_str(), "list");
+    // A key with no expiry reports NULL rather than Redis's -1 sentinel.
+    assert!(row_for(&format!("{ns}:user:1")).values[2].is_null());
+    assert!(!row_for(&format!("{ns}:user:2")).values[2].is_null());
+    assert_eq!(row_for(&format!("{ns}:user:1")).values[3].as_str(), "Ada");
+
+    // Replies of different shapes land in the grid sensibly.
+    let hash = driver.execute(&format!("HGETALL {ns}:cfg")).await.unwrap();
+    assert_eq!(hash[0].rows.len(), 2);
+
+    let list = driver
+        .execute(&format!("LRANGE {ns}:queue 0 -1"))
+        .await
+        .unwrap();
+    assert_eq!(list[0].rows.len(), 3);
+    assert_eq!(list[0].rows[0].values[0].as_str(), "a");
+
+    let scalar = driver.execute(&format!("GET {ns}:user:1")).await.unwrap();
+    assert_eq!(scalar[0].rows[0].values[0].as_str(), "Ada");
+
+    // A quoted argument survives the split, the way redis-cli handles it.
+    driver
+        .execute(&format!("SET {ns}:quoted \"two words\""))
+        .await
+        .unwrap();
+    let quoted = driver.execute(&format!("GET {ns}:quoted")).await.unwrap();
+    assert_eq!(quoted[0].rows[0].values[0].as_str(), "two words");
+
+    // Clean up after ourselves; the server may not be ours.
+    driver
+        .execute(&format!(
+            "DEL {ns}:user:1 {ns}:user:2 {ns}:cfg {ns}:queue {ns}:quoted"
+        ))
+        .await
+        .unwrap();
+    driver.disconnect().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn redis_read_only_blocks_writes_but_not_reads() {
+    let Some(mut credentials) = redis_credentials() else {
+        eprintln!("skipping: MIESQL_TEST_REDIS_URL is not set");
+        return;
+    };
+    credentials.profile.read_only = true;
+    let mut driver = make_driver(credentials).unwrap();
+    driver.connect().await.expect("connect");
+
+    assert!(driver.execute("PING").await.is_ok());
+    assert!(driver.execute("DBSIZE").await.is_ok());
+
+    // Redis has no read-only client mode, so this guard is ours to enforce.
+    let blocked = driver.execute("SET should_not_exist 1").await.unwrap_err();
+    assert_eq!(blocked.code.as_deref(), Some("MIESQL_READONLY"));
+    let flush = driver.execute("FLUSHDB").await.unwrap_err();
+    assert_eq!(flush.code.as_deref(), Some("MIESQL_READONLY"));
+
+    driver.disconnect().await;
+}

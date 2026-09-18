@@ -171,3 +171,9 @@ export function subtitle(profile: ConnectionProfile): string {
   if (profile.kind === "sqlite") return profile.filePath;
   return `${profile.host}:${profile.port}${profile.database ? `/${profile.database}` : ""}`;
 }
+
+/** Redis and MongoDB do not speak SQL, and the parts of the UI that assume it stay out of
+ *  their way. Mirrors DatabaseKind::is_relational on the Rust side. */
+export function isRelational(kind: DatabaseKind): boolean {
+  return kind === "postgres" || kind === "mysql" || kind === "mariadb" || kind === "sqlite";
+}

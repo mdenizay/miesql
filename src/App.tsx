@@ -36,6 +36,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import {
   displayName,
   errorText,
+  isRelational,
   subtitle,
   type AppSettings,
   type ConnectionProfile,
@@ -303,12 +304,19 @@ export function App() {
 
   const openTable = useCallback(
     (profile: ConnectionProfile, table: TableRef) => {
-      const quote = profile.kind === "mysql" || profile.kind === "mariadb" ? "`" : '"';
-      const qualified = [table.schema, table.name]
-        .filter(Boolean)
-        .map((part) => `${quote}${part}${quote}`)
-        .join(".");
-      const tab = newQueryTab(profile.id, `SELECT *\nFROM ${qualified}\nLIMIT 200;`);
+      let starter: string;
+      if (!isRelational(profile.kind)) {
+        // A Redis namespace is browsed with SCAN, not selected from.
+        starter = `SCAN 0 MATCH ${table.name}:* COUNT 100`;
+      } else {
+        const quote = profile.kind === "mysql" || profile.kind === "mariadb" ? "`" : '"';
+        const qualified = [table.schema, table.name]
+          .filter(Boolean)
+          .map((part) => `${quote}${part}${quote}`)
+          .join(".");
+        starter = `SELECT *\nFROM ${qualified}\nLIMIT 200;`;
+      }
+      const tab = newQueryTab(profile.id, starter);
       setTabs((current) => current.map((t) => (t.id === tab.id ? { ...t, title: table.name } : t)));
     },
     [newQueryTab],

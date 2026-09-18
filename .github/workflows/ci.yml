@@ -104,6 +104,12 @@ jobs:
         options: >-
           --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -pmiesql"
           --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:8
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
 
     steps:
       - uses: actions/checkout@v5
@@ -125,6 +131,8 @@ jobs:
           # MySQL 9 accounts default to caching_sha2_password, which cannot authenticate
           # over a plaintext socket — so this URL also exercises the TLS path.
           MIESQL_TEST_MYSQL_URL: mysql://miesql:sifre123@127.0.0.1:3306/miesql_test?sslmode=require
+          # The Redis tests write only under their own prefix and clean up after themselves.
+          MIESQL_TEST_REDIS_URL: redis://127.0.0.1:6379/15?sslmode=disable
           PGPASSWORD: miesql
         run: |
           psql -h 127.0.0.1 -U postgres -d miesql_test -v ON_ERROR_STOP=1 \
