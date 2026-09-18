@@ -81,6 +81,18 @@ enum Translations {
         "connection.section.security": "Security",
         "connection.section.appearance": "Appearance",
 
+        // Add from URL
+        "connection.url": "Connection URL",
+        "connection.url.section": "Add from URL",
+        "connection.url.placeholder": "postgres://user:password@host:5432/database",
+        "connection.url.apply": "Fill In Fields",
+        "connection.url.help": "Paste a connection string from your host, a .env file or docker-compose. Understands postgres://, mysql://, mariadb://, sqlite:// and the host=… key/value form.",
+        "connection.url.fromClipboard": "Found a connection URL on the clipboard.",
+        "connection.url.applied": "Filled in from the URL. Review it before saving.",
+        "connection.newFromURL": "New Connection from URL…",
+        "connection.copyURL": "Copy Connection URL",
+        "connection.copyURL.note": "The password is left out.",
+
         // Sidebar
         "sidebar.connections": "Connections",
         "sidebar.databases": "Databases",
@@ -297,6 +309,17 @@ enum Translations {
         "connection.section.general": "Genel",
         "connection.section.security": "Güvenlik",
         "connection.section.appearance": "Görünüm",
+
+        "connection.url": "Bağlantı URL'i",
+        "connection.url.section": "URL ile ekle",
+        "connection.url.placeholder": "postgres://kullanici:parola@sunucu:5432/veritabani",
+        "connection.url.apply": "Alanları Doldur",
+        "connection.url.help": "Sağlayıcınızdan, bir .env dosyasından ya da docker-compose'tan bağlantı dizesini yapıştırın. postgres://, mysql://, mariadb://, sqlite:// ve host=… biçimlerini anlar.",
+        "connection.url.fromClipboard": "Panoda bir bağlantı URL'i bulundu.",
+        "connection.url.applied": "URL'den dolduruldu. Kaydetmeden önce gözden geçirin.",
+        "connection.newFromURL": "URL ile Yeni Bağlantı…",
+        "connection.copyURL": "Bağlantı URL'ini Kopyala",
+        "connection.copyURL.note": "Parola dahil edilmez.",
 
         "sidebar.connections": "Bağlantılar",
         "sidebar.databases": "Veritabanları",

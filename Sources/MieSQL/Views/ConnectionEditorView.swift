@@ -11,7 +11,12 @@ struct ConnectionEditorView: View {
     @State private var password: String
     @State private var testState: TestState = .idle
 
-    private let isNew: Bool
+    // Import from a connection string.
+    @State private var urlText = ""
+    @State private var urlStatus: URLStatus = .idle
+    @State private var isURLSectionExpanded: Bool
+    /// Guards the engine picker's onChange while a pasted URL replaces the whole draft.
+    @State private var isApplyingURL = false
 
     enum TestState: Equatable {
         case idle
@@ -20,17 +25,27 @@ struct ConnectionEditorView: View {
         case failure(String)
     }
 
-    init(profile: ConnectionProfile) {
+    enum URLStatus: Equatable {
+        case idle
+        /// The clipboard held something that looks like a connection string.
+        case suggested
+        case applied(warnings: [String])
+        case failed(String)
+    }
+
+    init(profile: ConnectionProfile, startInURLMode: Bool = false) {
         _draft = State(initialValue: profile)
         _password = State(initialValue: profile.savePassword
             ? (KeychainStore.password(account: profile.keychainAccount) ?? "")
             : "")
-        isNew = profile.name.isEmpty && profile.host == "127.0.0.1" && profile.database.isEmpty && profile.filePath.isEmpty
+        _isURLSectionExpanded = State(initialValue: startInURLMode)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             Form {
+                urlSection
+
                 Section(app.t("connection.section.general")) {
                     TextField(app.t("connection.name"), text: $draft.name, prompt: Text(app.t("connection.name.placeholder")))
 
@@ -40,7 +55,15 @@ struct ConnectionEditorView: View {
                         }
                     }
                     .onChange(of: draft.kind) { _, newKind in
-                        // Keep the port and user sensible when the engine changes.
+                        // Applying a URL replaces the whole draft, and the engine it names
+                        // usually differs from the one on screen. That must not reset the
+                        // port and user the URL just supplied.
+                        guard !isApplyingURL else {
+                            isApplyingURL = false
+                            return
+                        }
+                        // Otherwise the user picked a different engine: keep the port and
+                        // user sensible for it.
                         draft.port = newKind.defaultPort
                         if draft.username.isEmpty || DatabaseKind.allCases.contains(where: { $0.defaultUser == draft.username }) {
                             draft.username = newKind.defaultUser
@@ -94,7 +117,99 @@ struct ConnectionEditorView: View {
             Divider()
             footer
         }
-        .frame(width: 480, height: 560)
+        .frame(width: 480, height: 600)
+        .onAppear(perform: offerClipboardURL)
+    }
+
+    // MARK: - Add from URL
+
+    @ViewBuilder
+    private var urlSection: some View {
+        Section {
+            DisclosureGroup(isExpanded: $isURLSectionExpanded) {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField(app.t("connection.url"), text: $urlText, prompt: Text(app.t("connection.url.placeholder")), axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.callout.monospaced())
+                        .lineLimit(1...3)
+                        .onSubmit(applyURL)
+
+                    HStack(spacing: 8) {
+                        Button(app.t("connection.url.apply"), action: applyURL)
+                            .disabled(urlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Spacer()
+                    }
+
+                    switch urlStatus {
+                    case .idle:
+                        Text(app.t("connection.url.help"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    case .suggested:
+                        Label(app.t("connection.url.fromClipboard"), systemImage: "doc.on.clipboard")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    case .applied(let warnings):
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(app.t("connection.url.applied"), systemImage: "checkmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                            // Anything understood but not honoured exactly is said out loud
+                            // rather than quietly changing what the URL asked for.
+                            ForEach(warnings, id: \.self) { warning in
+                                Label(warning, systemImage: "exclamationmark.triangle")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    case .failed(let message):
+                        Label(message, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.top, 4)
+            } label: {
+                Label(app.t("connection.url.section"), systemImage: "link")
+            }
+        }
+    }
+
+    private func applyURL() {
+        do {
+            let parsed = try ConnectionURLParser.parse(urlText)
+            var profile = parsed.profile
+            // Editing an existing connection keeps its identity, its folder and its colour;
+            // only the details the URL actually carries are replaced.
+            profile.id = draft.id
+            profile.folder = draft.folder
+            profile.colorHex = draft.colorHex
+            profile.notes = draft.notes
+            if !draft.name.isEmpty { profile.name = draft.name }
+
+            isApplyingURL = profile.kind != draft.kind
+            draft = profile
+            if let parsedPassword = parsed.password {
+                password = parsedPassword
+            }
+            urlStatus = .applied(warnings: parsed.warnings)
+            testState = .idle
+        } catch {
+            urlStatus = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Offers the clipboard when it holds something that parses, which is how most people
+    /// arrive here — straight from a hosting dashboard.
+    private func offerClipboardURL() {
+        guard isURLSectionExpanded, urlText.isEmpty else { return }
+        guard let clipboard = NSPasteboard.general.string(forType: .string),
+              ConnectionURLParser.looksLikeConnectionURL(clipboard) else { return }
+        urlText = clipboard.trimmingCharacters(in: .whitespacesAndNewlines)
+        urlStatus = .suggested
     }
 
     private var colorPicker: some View {

@@ -32,6 +32,8 @@ final class AppModel: ObservableObject {
 
     // Sheets and alerts
     @Published var editingProfile: ConnectionProfile?
+    /// Opens the connection editor with its "Add from URL" section already unfolded.
+    @Published var editorStartsInURLMode = false
     @Published var passwordRequest: PasswordRequest?
     @Published var confirmation: Confirmation?
     @Published var alert: AlertMessage?
@@ -70,6 +72,23 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: - Profiles
+
+    func newConnection(fromURL: Bool = false) {
+        editorStartsInURLMode = fromURL
+        editingProfile = ConnectionProfile()
+    }
+
+    func editConnection(_ profile: ConnectionProfile) {
+        editorStartsInURLMode = false
+        editingProfile = profile
+    }
+
+    /// Puts a connection string for this profile on the clipboard, without the password.
+    func copyConnectionURL(for profile: ConnectionProfile) {
+        let url = ConnectionURLParser.string(for: profile)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url, forType: .string)
+    }
 
     func save(profile: ConnectionProfile, password: String?) {
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {

@@ -262,3 +262,72 @@ struct SQLiteIntegrationTests {
         await driver.disconnect()
     }
 }
+
+/// Closes the loop between the URL parser and the drivers: a pasted connection string has
+/// to produce a profile that actually opens.
+@Suite("Connecting from a URL", .serialized)
+struct ConnectionURLIntegrationTests {
+
+    @Test("A SQLite URL produces a profile that connects and queries")
+    func sqliteURLConnects() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("miesql-url-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let path = directory.appendingPathComponent("from-url.sqlite").path
+
+        let parsed = try ConnectionURLParser.parse("sqlite://\(path)")
+        #expect(parsed.profile.kind == .sqlite)
+        #expect(parsed.profile.filePath == path)
+
+        let driver = SQLiteDriver(credentials: ConnectionCredentials(profile: parsed.profile, password: parsed.password))
+        let info = try await driver.connect()
+        #expect(info.productName == "SQLite")
+
+        _ = try await driver.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, label TEXT); INSERT INTO t (label) VALUES ('ok');")
+        let result = try await driver.execute("SELECT label FROM t")
+        #expect(result.first?.rows.first?[0].stringValue == "ok")
+
+        await driver.disconnect()
+    }
+
+    @Test("A read-only URL parameter reaches the driver")
+    func readOnlyURLIsEnforced() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("miesql-url-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let path = directory.appendingPathComponent("ro.sqlite").path
+
+        let writable = SQLiteDriver(credentials: ConnectionCredentials(
+            profile: ConnectionProfile(kind: .sqlite, filePath: path), password: nil
+        ))
+        _ = try await writable.connect()
+        _ = try await writable.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
+        await writable.disconnect()
+
+        let parsed = try ConnectionURLParser.parse("sqlite://\(path)?mode=ro")
+        #expect(parsed.profile.readOnly)
+
+        let guarded = SQLiteDriver(credentials: ConnectionCredentials(profile: parsed.profile, password: parsed.password))
+        _ = try await guarded.connect()
+        await #expect(throws: DatabaseError.self) {
+            _ = try await guarded.execute("DROP TABLE t")
+        }
+        await guarded.disconnect()
+    }
+
+    @Test("Credentials survive the round trip into a profile")
+    func credentialsReachTheProfile() throws {
+        let parsed = try ConnectionURLParser.parse("postgres://ada:p@ss word@db.example.com:6432/analytics?sslmode=require")
+        let credentials = ConnectionCredentials(profile: parsed.profile, password: parsed.password)
+
+        #expect(credentials.profile.username == "ada")
+        #expect(credentials.profile.host == "db.example.com")
+        #expect(credentials.profile.port == 6432)
+        #expect(credentials.profile.database == "analytics")
+        #expect(credentials.profile.sslMode == .require)
+        #expect(credentials.password == "p@ss word")
+        // A URL that carries a password opts into the Keychain by default.
+        #expect(credentials.profile.savePassword)
+        #expect(credentials.profile.validationError == nil)
+    }
+}

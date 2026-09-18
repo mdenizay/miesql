@@ -36,10 +36,13 @@ struct SidebarView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    app.editingProfile = ConnectionProfile()
+                Menu {
+                    Button(app.t("connection.new")) { app.newConnection() }
+                    Button(app.t("connection.newFromURL")) { app.newConnection(fromURL: true) }
                 } label: {
                     Label(app.t("connection.new"), systemImage: "plus")
+                } primaryAction: {
+                    app.newConnection()
                 }
                 .help(app.t("connection.new"))
             }
@@ -215,8 +218,10 @@ struct SidebarView: View {
             Button(app.t("connection.connect")) { app.connect(to: profile) }
         }
         Divider()
-        Button(app.t("general.edit")) { app.editingProfile = profile }
+        Button(app.t("general.edit")) { app.editConnection(profile) }
         Button(app.t("general.duplicate")) { app.duplicate(profile: profile) }
+        Button(app.t("connection.copyURL")) { app.copyConnectionURL(for: profile) }
+            .help(app.t("connection.copyURL.note"))
         Divider()
         Button(app.t("general.delete"), role: .destructive) {
             app.confirmation = Confirmation(
@@ -262,7 +267,7 @@ struct SidebarView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button(app.t("connection.new")) {
-                app.editingProfile = ConnectionProfile()
+                app.newConnection()
             }
             .buttonStyle(.borderedProminent)
             .padding(.top, 4)

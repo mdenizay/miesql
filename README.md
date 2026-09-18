@@ -15,6 +15,7 @@ network calls other than to the databases you point it at.
 
 **Connections**
 - PostgreSQL, MySQL, MariaDB and SQLite
+- **Add a connection by pasting its URL** — see [Connection URLs](#connection-urls)
 - Many connections open at once, each on its own actor — a slow query on one server never
   blocks another
 - Passwords in the macOS Keychain, never in a config file
@@ -56,6 +57,34 @@ network calls other than to the databases you point it at.
 - English and Turkish, switchable at runtime with no relaunch
 - Command palette (`⌘K`) over connections, tables and actions
 - Universal keyboard shortcuts and a real macOS menu bar
+
+## Connection URLs
+
+**New Connection from URL…** — in the sidebar `+` menu, at `⌥⌘N`, or from the command
+palette — accepts any of these:
+
+```
+postgres://user:password@host:5432/database?sslmode=require
+postgresql://user@host/db          # database defaults to the username, as libpq does
+mysql://root:p@ss@127.0.0.1:3307/shop
+mariadb://root@localhost/shop
+jdbc:postgresql://localhost:5432/app
+sqlite:///Users/you/app.sqlite
+/Users/you/app.sqlite              # a bare path works too
+host=db.example.com port=5433 dbname=app user=ada password='se cret'
+DATABASE_URL="postgres://u:p@h/d"  # quotes and the env-var prefix are stripped
+```
+
+Passwords containing `@`, `:` or `/` parse correctly, encoded or not — the part most
+connection-string parsers get wrong. IPv6 hosts and comma-separated failover lists work.
+The parameters `sslmode` / `useSSL` / `ssl-mode`, `connect_timeout`, `mode=ro` and
+`readonly` are read; `verify-ca` and `verify-full` are accepted but reported as downgraded
+to Require, because certificate validation is not implemented yet.
+
+The URL fills in the form rather than saving straight away, so you can check it first. If
+the clipboard already holds something that parses, it is offered in the field when the
+sheet opens. Going the other way, a connection's context menu has **Copy Connection URL**,
+which leaves the password out.
 
 ## Install
 
@@ -204,6 +233,8 @@ telemetri yok. Bağlantı profilleri, sorgu geçmişi, ayarlar — hepsi bu Mac'
 uygulama bağlandığınız veritabanları dışında hiçbir ağ isteği yapmaz.
 
 **v0.1'de olanlar:** PostgreSQL, MySQL, MariaDB ve SQLite; eş zamanlı çoklu bağlantı;
+**bağlantı URL'i yapıştırarak ekleme** (`postgres://`, `mysql://`, `mariadb://`, `sqlite://`,
+JDBC ön eki ve `host=… dbname=…` biçimi; parolada `@`, `:`, `/` olsa bile doğru ayrışır);
 Anahtar Zinciri'nde parola saklama; bağlantı bazlı salt okunur kipi; sözdizimi renklendirmeli
 ve şema farkında tamamlamalı SQL editörü; sayfalama, sıralama ve süzme ile veri tarayıcı;
 birincil anahtar üzerinden satır düzenleme (çalıştırmadan önce ifadeleri gösterir); yapı ve

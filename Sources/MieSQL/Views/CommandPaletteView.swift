@@ -102,7 +102,8 @@ struct CommandPaletteView: View {
         }
 
         let actions: [Item] = [
-            .action(key: "connection.new", symbol: "plus.circle") { app.editingProfile = ConnectionProfile() },
+            .action(key: "connection.new", symbol: "plus.circle") { app.newConnection() },
+            .action(key: "connection.newFromURL", symbol: "link.badge.plus") { app.newConnection(fromURL: true) },
             .action(key: "workspace.newQuery", symbol: "terminal") {
                 if let sessionID = app.selectedSessionID ?? app.sessions.first?.id {
                     app.newQueryTab(sessionID: sessionID)

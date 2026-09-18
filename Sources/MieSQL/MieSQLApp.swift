@@ -45,9 +45,14 @@ struct AppCommands: Commands {
             .disabled(app.sessions.isEmpty)
 
             Button(app.t("connection.new")) {
-                app.editingProfile = ConnectionProfile()
+                app.newConnection()
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
+
+            Button(app.t("connection.newFromURL")) {
+                app.newConnection(fromURL: true)
+            }
+            .keyboardShortcut("n", modifiers: [.command, .option])
         }
 
         CommandGroup(after: .newItem) {

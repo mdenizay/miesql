@@ -13,7 +13,7 @@ struct ContentView: View {
             WorkspaceView()
         }
         .sheet(item: $app.editingProfile) { profile in
-            ConnectionEditorView(profile: profile)
+            ConnectionEditorView(profile: profile, startInURLMode: app.editorStartsInURLMode)
                 .environmentObject(app)
         }
         .sheet(item: $app.passwordRequest) { request in
