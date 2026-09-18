@@ -39,7 +39,7 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 
 # TLS is rustls everywhere rather than the system OpenSSL. That is the difference between
 # a Linux build that works on any distro and one that needs -dev packages installed.
-rustls = "0.23"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 tokio-rustls = "0.26"
 rustls-native-certs = "0.8"
 rustls-pki-types = "1"
@@ -58,6 +58,7 @@ rusqlite = { version = "0.40", features = ["bundled", "column_decltype"] }
 
 redis = { version = "0.32", features = ["tokio-comp", "tokio-rustls-comp"] }
 mongodb = "3"
+async-trait = "0.1.92"
 
 [dev-dependencies]
 tempfile = "3"

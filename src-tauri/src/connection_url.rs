@@ -383,6 +383,10 @@ fn ssl_mode_from(value: &str, warnings: &mut Vec<String>) -> Option<SslMode> {
 }
 
 /// libpq's `host=localhost port=5432 dbname=app` form.
+// The final `commit!()` after the loop resets `reading_key` for a next iteration that
+// never comes, which the lint sees as dead. Keeping the macro uniform is worth more than
+// splitting it in two to satisfy it.
+#[allow(unused_assignments)]
 fn parse_keyword_value(input: &str) -> Result<ParsedConnectionUrl> {
     let mut pairs: Vec<(String, String)> = Vec::new();
     let mut key = String::new();
