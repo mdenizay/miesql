@@ -23,17 +23,16 @@ to the databases you point it at and, if you leave it on, the update check.
 | Windows | `MieSQL_*_x64-setup.exe` |
 | Linux | `.AppImage`, `.deb` or `.rpm` |
 
-Nothing is code-signed — that needs a paid Apple Developer account and an Authenticode
-certificate — so each platform will warn you the first time.
-
-- **macOS:** `xattr -dr com.apple.quarantine /Applications/MieSQL.app`, or open
-  **System Settings → Privacy & Security** after the first attempt and choose **Open Anyway**.
-- **Windows:** SmartScreen reports an unknown publisher. The installer is per-user and
+- **macOS:** signed with a Developer ID and notarised by Apple, so it opens with no
+  warning and no workaround. The very first launch takes a while, because macOS verifies
+  the whole bundle once; every launch after that is immediate.
+- **Windows:** the installer is **not** signed, so SmartScreen reports an unknown
+  publisher — choose **More info → Run anyway**. It installs for the current user and
   needs no administrator rights.
 - **Linux:** `chmod +x` the AppImage. Saving passwords needs a Secret Service provider
   such as gnome-keyring or KWallet; without one MieSQL says so and asks each time instead.
 
-Would rather not run an unsigned binary from a stranger? Reasonable. Build it yourself:
+Would rather build it yourself? Reasonable, and quick:
 
 ```bash
 git clone https://github.com/mdenizay/miesql.git
@@ -143,10 +142,8 @@ Known and deliberate, as of v0.2.0:
 - **The result grid is read-only**, and there is no Structure or DDL tab. v0.1.0 had both.
 - **Certificate validation is not implemented.** `verify-ca` and `verify-full` are treated
   as Require, and the app says so rather than pretending.
-- **Saved passwords are asked for again after an update on macOS.** A keychain item belongs
-  to the code signature that wrote it, and an unsigned app's signature changes every build.
-  A Developer ID certificate would end this; until then MieSQL re-saves the password
-  instead of failing.
+- **The Windows installer is unsigned**, so SmartScreen warns about it. macOS is signed
+  and notarised.
 - **Builds are x86_64 on Windows and Linux.** macOS is universal.
 - **English only.** v0.1.0 also had Turkish; it is not ported yet.
 
@@ -197,8 +194,8 @@ Yapı/DDL sekmeleri de yok. Bunlara ihtiyacınız varsa şimdilik
 
 **İndirme:** [en son sürüm](https://github.com/mdenizay/miesql/releases/latest) — macOS
 için universal `.dmg` (Apple Silicon ve Intel), Windows için `.exe`, Linux için
-`.AppImage` / `.deb` / `.rpm`. Hiçbiri imzalı değil, bu yüzden ilk açılışta işletim
-sistemi uyarır; yukarıdaki [Download](#download) bölümünde her platform için geçiş yolu
-yazılı.
+`.AppImage` / `.deb` / `.rpm`. macOS sürümü Developer ID ile imzalı ve Apple
+tarafından notarize edilmiştir — uyarısız açılır, yalnızca ilk açılış bir kerelik uzun
+sürer. Windows kurulumu imzasız olduğu için SmartScreen uyarır (**More info → Run anyway**).
 
 Arayüz şimdilik yalnızca İngilizce. Katkılar memnuniyetle karşılanır. Lisans: MIT.
