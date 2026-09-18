@@ -8,10 +8,9 @@ bundled Chromium, no telemetry. Everything you create — connection profiles, q
 history, settings — stays on your machine, and the app makes no network calls other than
 to the databases you point it at and, if you leave it on, the update check.
 
-> **Status: early.** v0.2.0 is a rewrite; it supports **PostgreSQL and SQLite**. MySQL and
-> MariaDB worked in the macOS-only v0.1.0 and are not ported yet. If you need them, use
-> [v0.1.0](https://github.com/mdenizay/miesql/releases/tag/v0.1.0) for now. See
-> [Limitations](#limitations) for the honest list.
+> **Status: early but usable.** Supports **PostgreSQL, MySQL, MariaDB, SQLite and Redis**.
+> MongoDB and Firebase are not implemented. See [Limitations](#limitations) for the honest
+> list of what is still missing.
 
 ## Download
 
@@ -44,8 +43,10 @@ npm run app:build
 ## Features
 
 **Connections**
-- PostgreSQL and SQLite, with several open at once — each on its own lock, so a slow query
-  on one server never blocks another
+- PostgreSQL, MySQL, MariaDB, SQLite and Redis, with several open at once — each on its own
+  lock, so a slow query on one server never blocks another
+- **SSH tunnelling**, through the system ssh client, so `~/.ssh/config`, the agent,
+  hardware keys and jump hosts all work exactly as they do in a terminal
 - Add a connection by pasting its URL — see [Connection URLs](#connection-urls)
 - Passwords in the OS credential store: Keychain, Credential Manager or the Secret Service
 - Per-connection **read-only mode** that blocks writes and DDL before they leave the app
@@ -60,10 +61,22 @@ npm run app:build
 - Virtualised result grid: only visible rows exist in the DOM, so scrolling 100k rows costs
   what scrolling 10 does
 - `NULL` is always distinct from the empty string, in the grid and in exports
-- Local query history
+- Local query history and saved snippets
+
+**Browsing and changing data**
+- Tables open with **Data, Structure and DDL** tabs: columns, indexes, foreign keys, and
+  the `CREATE` statement
+- **Editable grid.** Edits are held locally and applying them shows the exact `UPDATE` and
+  `DELETE` statements first. Every one keys on the complete primary key, a NULL key part
+  becomes `IS NULL`, and a table without a key is refused rather than guessed at
+- **Dump and restore**: structure, data or both, streamed to disk so a table larger than
+  RAM is fine; restore runs statement by statement and names the one that failed
+- **CSV import** with a preview and per-column mapping
+- Export a result as CSV, TSV, JSON, SQL `INSERT` or Markdown
 
 **The rest**
 - Light, dark and system appearance
+- English and Turkish, switchable at runtime with no relaunch
 - Automatic updates — checked at launch and downloaded in the background, but never
   installed on their own; applying one waits for you to restart
 - `miesql --doctor`, a self-check for the data directory and credential store
@@ -113,7 +126,9 @@ src-tauri/src/
   models.rs           Connection profiles, result sets, schema objects
   connection_url.rs   Connection-string parsing and serialising
   sql/                Dialect quoting, statement splitter
-  drivers/            The Driver trait, PostgreSQL and SQLite
+  drivers/            The Driver trait, PostgreSQL, MySQL, SQLite and Redis
+  transfer/           Row editing, dump and restore, CSV, export
+  ssh.rs              Tunnelling through the system ssh client
   storage/            Profiles, settings, history, OS credential store
   commands.rs         The only surface the UI can reach
 src/
@@ -134,18 +149,20 @@ small: connect, execute, list, describe.
 
 ## Limitations
 
-Known and deliberate, as of v0.2.0:
+Known and deliberate:
 
-- **No MySQL or MariaDB yet.** They worked in v0.1.0 and are the next thing being ported.
-- **No Redis, MongoDB or SSH tunnelling.**
-- **No dump, restore or CSV import.** v0.1.0 had these.
-- **The result grid is read-only**, and there is no Structure or DDL tab. v0.1.0 had both.
+- **No MongoDB or Firebase.**
+- **No schema editor.** Structure and DDL are read-only; changing a table means writing the
+  `ALTER` yourself.
+- **SSH tunnelling needs an `ssh` binary**, which macOS and Linux always have and Windows
+  has shipped since Windows 10. Password authentication over SSH does not work on Windows,
+  because its ssh.exe ignores `SSH_ASKPASS`; use a key or ssh-agent there.
 - **Certificate validation is not implemented.** `verify-ca` and `verify-full` are treated
   as Require, and the app says so rather than pretending.
 - **The Windows installer is unsigned**, so SmartScreen warns about it. macOS is signed
   and notarised.
 - **Builds are x86_64 on Windows and Linux.** macOS is universal.
-- **English only.** v0.1.0 also had Turkish; it is not ported yet.
+- **Two languages**, English and Turkish.
 
 ## Privacy
 
@@ -182,15 +199,14 @@ alternatif. Rust ve React ile yazıldı, Tauri ile paketlendi. Electron yok, tel
 Bağlantı profilleri, sorgu geçmişi ve ayarlar bu cihazda kalır; uygulama bağlandığınız
 veritabanları ve (açık bırakırsanız) güncelleme kontrolü dışında ağa çıkmaz.
 
-**v0.2.0'da olanlar:** PostgreSQL ve SQLite; eş zamanlı çoklu bağlantı; işletim sisteminin
+**Desteklenenler:** PostgreSQL, MySQL, MariaDB, SQLite ve Redis; eş zamanlı çoklu bağlantı; işletim sisteminin
 kimlik deposunda parola saklama; bağlantı bazlı salt okunur kipi; sözdizimi renklendirmeli
 ve şema farkında tamamlamalı SQL editörü; 100 bin satırı akıcı gezen sanallaştırılmış
 sonuç tablosu; bağlantı URL'i yapıştırarak ekleme; otomatik güncelleme; açık/koyu tema.
 
-**Önemli:** Bu sürüm yeniden yazımdır ve v0.1.0'dan **daha az veritabanı destekler**.
-MySQL ve MariaDB henüz aktarılmadı; dump/restore, CSV içe aktarma, düzenlenebilir tablo ve
-Yapı/DDL sekmeleri de yok. Bunlara ihtiyacınız varsa şimdilik
-[v0.1.0](https://github.com/mdenizay/miesql/releases/tag/v0.1.0) sürümünde kalın.
+SSH tüneli, düzenlenebilir tablo (çalıştırmadan önce ifadeleri gösterir), Yapı/DDL
+sekmeleri, dump/restore, CSV içe aktarma ve Türkçe arayüz dahildir. MongoDB ve Firebase
+henüz yok.
 
 **İndirme:** [en son sürüm](https://github.com/mdenizay/miesql/releases/latest) — macOS
 için universal `.dmg` (Apple Silicon ve Intel), Windows için `.exe`, Linux için

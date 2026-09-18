@@ -1,65 +1,68 @@
-The macOS build is now signed with a Developer ID and notarised by Apple. It opens with no
-warning and no workaround — no quarantine flag to clear, no trip through Privacy &
-Security. The first launch takes a while because macOS verifies the whole bundle once;
-every launch after that is immediate.
+MieSQL now covers the feature set the macOS-only v0.1.0 had, and more besides. It supports
+**PostgreSQL, MySQL, MariaDB, SQLite and Redis** on macOS, Windows and Linux.
 
-That also fixes a real bug rather than just removing a dialog. macOS ties a keychain item
-to the code signature that wrote it, and an ad-hoc signature is derived from the binary,
-so it changed on every build — which is why v0.2.0 asked for saved passwords again after
-each update. The signature is stable now, so a password saved today survives future
-updates.
+Everything still stays on your device. Passwords go to the system credential store, and the
+app makes no network calls beyond the databases you connect to and, if you leave it on, the
+update check.
 
-Everything still stays on your device. Passwords go to the system credential store, and
-the app makes no network calls beyond the databases you connect to and, if you leave it
-on, the update check.
+## New since v0.2.1
 
-## Updating from v0.2.0
+**MySQL and MariaDB.** The gap against v0.1.0 is closed. Like the other drivers it uses the
+text protocol, so values arrive rendered by the server and a query returning no rows still
+shows its column headers.
 
-You will be asked for saved passwords one last time. The items in your keychain were
-written under the old ad-hoc signature and cannot be carried across; re-entering a
-password stores it under the new one, and it stays there from now on.
+**Redis.** Not relational, so the mapping is deliberate: a database is a numbered Redis
+database, a table is a key namespace, rows are the keys in it with type, TTL and a value
+preview, and the editor runs raw commands. Listings use `SCAN`, never `KEYS`, because
+`KEYS` blocks the server for the length of the keyspace.
 
-The bundle identifier also changed, from `app.miesql.MieSQL` to `com.mdenizay.miesql`. On
-macOS the updater handles that in place. On Windows the installer treats it as a new
-install, so remove the old one from Apps & Features if you had v0.2.0.
+**Editable grid.** Edits are held locally and applying them shows the exact `UPDATE` and
+`DELETE` statements to agree to first. Every statement keys on the complete primary key, a
+NULL key part becomes `IS NULL` rather than `= NULL` — which would match nothing and
+silently change no rows — and a table without a key is refused rather than guessed at.
 
-## Still the same as v0.2.0
+**Structure and DDL tabs.** Columns, indexes, foreign keys and the `CREATE` statement.
 
-This is a packaging release; nothing changed in what the app can do. It supports
-**PostgreSQL and SQLite**. **MySQL and MariaDB are not ported yet** — they worked in
-[v0.1.0](https://github.com/mdenizay/miesql/releases/tag/v0.1.0), along with dump and
-restore, CSV import, the editable grid and the Structure and DDL tabs. If you depend on
-any of those, stay on v0.1.0.
+**Dump, restore and CSV import.** Dumps stream to disk, so a table larger than RAM works,
+and progress actually moves. Restore runs one statement at a time and names the one that
+failed. Results export as CSV, TSV, JSON, SQL or Markdown.
+
+**SSH tunnelling.** Through the system `ssh` client, so `~/.ssh/config`, ssh-agent,
+hardware keys, jump hosts and `known_hosts` all work exactly as they do in a terminal —
+host key verification is OpenSSH's, not a reimplementation of it.
+
+**Turkish.** The interface switches language at runtime, with no relaunch.
+
+**Query history and snippets** are reachable from the toolbar.
+
+## Fixed
+
+- Connecting to MySQL over TLS **crashed the app**. Two rustls crypto providers had ended
+  up in the dependency tree, and rustls aborts rather than choosing between them. There is
+  now one, which also removed cmake and nasm from the Windows build.
+- On Linux without a Secret Service, saving a password failed with a raw DBus message. It
+  now says which package to install, and offers not saving the password instead.
 
 ## Install
 
-**macOS** — open the `.dmg` and drag MieSQL to Applications. Universal: Apple Silicon and
-Intel.
+**macOS** — open the `.dmg` and drag MieSQL to Applications. Signed with a Developer ID and
+notarised, so it opens with no warning. Universal: Apple Silicon and Intel.
 
-**Windows** — run the `.exe`. The installer is **not** signed, so SmartScreen will report
-an unknown publisher; choose **More info → Run anyway**. It installs for the current user
-and needs no administrator rights.
+**Windows** — run the `.exe`. The installer is **not** signed, so SmartScreen will report an
+unknown publisher; choose **More info → Run anyway**. Per-user, no administrator rights.
 
 **Linux** — take the `.AppImage` (`chmod +x` it first), or the `.deb` or `.rpm`. Saving
-passwords needs a Secret Service provider such as gnome-keyring or KWallet; without one
-MieSQL says so and lets you enter the password each time instead.
-
-Prefer to build it yourself:
-
-```bash
-git clone https://github.com/mdenizay/miesql.git
-cd miesql && npm install && npm run app:build
-```
+passwords needs gnome-keyring or KWallet; without one MieSQL says so and asks each time.
 
 ## Known limitations
 
-- No MySQL or MariaDB yet, and no Redis, MongoDB or SSH tunnelling.
-- No dump, restore or CSV import.
-- The result grid is read-only; there is no Structure or DDL tab.
+- No MongoDB or Firebase.
+- No schema editor: Structure and DDL are read-only.
+- SSH password authentication does not work on Windows, because its `ssh.exe` ignores
+  `SSH_ASKPASS`. Use a key or ssh-agent there.
 - Certificate validation is not implemented. `verify-ca` and `verify-full` are accepted but
-  downgraded to Require, and the app tells you so rather than pretending.
+  downgraded to Require, and the app says so rather than pretending.
 - The Windows installer is unsigned.
 - Builds are x86_64 on Windows and Linux; macOS is universal.
-- The interface is English only.
 
 Progress and the full checklist: https://github.com/mdenizay/miesql/pull/1
