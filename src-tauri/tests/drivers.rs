@@ -325,3 +325,28 @@ async fn postgres_reports_server_errors_with_their_sqlstate() {
     assert_eq!(error.code.as_deref(), Some("42P01"));
     assert!(error.message.contains("table_that_is_not_there"));
 }
+
+// MARK: - Credential store
+
+/// The bug this covers: an item written under one code signature cannot be overwritten
+/// under another, which is every rebuild of an unsigned app and every update of a shipped
+/// one. The write has to heal itself rather than surfacing an opaque platform error.
+#[test]
+fn saving_a_password_twice_overwrites_it() {
+    let account = format!("miesql-test-{}", uuid::Uuid::new_v4());
+
+    miesql_lib::storage::save_password(&account, "first").expect("first write");
+    assert_eq!(
+        miesql_lib::storage::load_password(&account).as_deref(),
+        Some("first")
+    );
+
+    miesql_lib::storage::save_password(&account, "second").expect("second write");
+    assert_eq!(
+        miesql_lib::storage::load_password(&account).as_deref(),
+        Some("second")
+    );
+
+    miesql_lib::storage::delete_password(&account);
+    assert_eq!(miesql_lib::storage::load_password(&account), None);
+}

@@ -74,12 +74,34 @@ pub fn save_profiles(profiles: &[ConnectionProfile]) -> DbResult<()> {
 
 const CREDENTIAL_SERVICE: &str = "app.miesql.connections";
 
+/// Writes a password, healing the case where an item already exists under a different
+/// code signature.
+///
+/// macOS ties a keychain item to the identity that created it. An unsigned or ad-hoc
+/// signed app gets a new identity on every build, so an item written by yesterday's build —
+/// or by a previous version of MieSQL entirely — is one this build is not allowed to
+/// overwrite, and the write comes back as an opaque "platform secure storage failure".
+/// Removing the stale item and writing fresh turns that dead end into a no-op the user
+/// never sees.
 pub fn save_password(account: &str, password: &str) -> DbResult<()> {
-    keyring::Entry::new(CREDENTIAL_SERVICE, account)
-        .and_then(|entry| entry.set_password(password))
-        .map_err(|e| DbError::new(format!("Could not save the password: {e}")))
+    let entry = keyring::Entry::new(CREDENTIAL_SERVICE, account)
+        .map_err(|e| credential_error("open the credential store", &e))?;
+
+    match entry.set_password(password) {
+        Ok(()) => Ok(()),
+        Err(first) => {
+            let _ = entry.delete_credential();
+            entry
+                .set_password(password)
+                // Two failures in a row is a real problem, not a stale item.
+                .map_err(|_| credential_error("save the password", &first))
+        }
+    }
 }
 
+/// A password that cannot be read is treated as one that was never saved: the app asks
+/// for it again rather than failing. That is what makes the signature change above
+/// recoverable instead of fatal.
 pub fn load_password(account: &str) -> Option<String> {
     keyring::Entry::new(CREDENTIAL_SERVICE, account)
         .ok()?
@@ -91,6 +113,13 @@ pub fn delete_password(account: &str) {
     if let Ok(entry) = keyring::Entry::new(CREDENTIAL_SERVICE, account) {
         let _ = entry.delete_credential();
     }
+}
+
+fn credential_error(action: &str, error: &keyring::Error) -> DbError {
+    DbError::new(format!("Could not {action}."))
+        // keyring's Display collapses every platform failure into one sentence, which
+        // leaves nothing to act on; the Debug form carries the OS status code.
+        .with_detail(format!("{error}\n{error:?}"))
 }
 
 // MARK: - Settings

@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod connection_url;
+pub mod doctor;
 pub mod drivers;
 pub mod error;
 pub mod models;
@@ -10,6 +11,12 @@ pub mod tls;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // A self-check that needs no window, so it still answers when the UI is the thing
+    // that is broken.
+    if std::env::args().any(|arg| arg == "--doctor") {
+        std::process::exit(doctor::run());
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

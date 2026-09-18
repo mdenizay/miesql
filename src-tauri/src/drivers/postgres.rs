@@ -561,5 +561,39 @@ fn map_error(error: tokio_postgres::Error) -> DbError {
                     .join("\n"),
             );
     }
-    DbError::new(error.to_string())
+
+    // tokio-postgres renders configuration problems as the bare words "invalid
+    // configuration", which tells nobody anything. The cause underneath does, and the
+    // most common one by far is a server that wants a password when none was supplied.
+    let cause = chain(&error);
+    let message = error.to_string();
+    if message == "invalid configuration" {
+        let hint = if cause.contains("password") {
+            "This server requires a password. Enter one in the connection settings, or tick \"Save password\" so it is remembered."
+        } else {
+            "Check the host, port, username and database in the connection settings."
+        };
+        return DbError::new(if cause.is_empty() {
+            hint.to_string()
+        } else {
+            format!("{cause}. {hint}")
+        });
+    }
+
+    DbError::new(message).with_detail(cause)
+}
+
+/// Flattens an error's source chain, which is where tokio-postgres keeps the part worth
+/// reading.
+fn chain(error: &dyn std::error::Error) -> String {
+    let mut parts = Vec::new();
+    let mut current = error.source();
+    while let Some(source) = current {
+        let text = source.to_string();
+        if !text.is_empty() && !parts.contains(&text) {
+            parts.push(text);
+        }
+        current = source.source();
+    }
+    parts.join(": ")
 }
