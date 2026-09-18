@@ -114,6 +114,20 @@ pub struct ConnectionProfile {
     pub color_hex: Option<String>,
     #[serde(default = "default_timeout")]
     pub connect_timeout_seconds: u64,
+
+    /// Reach the database through an SSH tunnel rather than directly. The host and port
+    /// above stay as the server sees them; the tunnel is what makes them reachable.
+    #[serde(default)]
+    pub ssh_enabled: bool,
+    #[serde(default)]
+    pub ssh_host: String,
+    #[serde(default = "default_ssh_port")]
+    pub ssh_port: u16,
+    #[serde(default)]
+    pub ssh_username: String,
+    /// Path to a private key. Empty means rely on ssh-agent or ~/.ssh/config.
+    #[serde(default)]
+    pub ssh_key_path: String,
     #[serde(default)]
     pub notes: String,
     #[serde(default)]
@@ -128,6 +142,10 @@ fn default_host() -> String {
 
 fn default_timeout() -> u64 {
     10
+}
+
+fn default_ssh_port() -> u16 {
+    22
 }
 
 impl ConnectionProfile {
@@ -147,6 +165,11 @@ impl ConnectionProfile {
             folder: String::new(),
             color_hex: None,
             connect_timeout_seconds: default_timeout(),
+            ssh_enabled: false,
+            ssh_host: String::new(),
+            ssh_port: default_ssh_port(),
+            ssh_username: String::new(),
+            ssh_key_path: String::new(),
             notes: String::new(),
             created_at: Some(chrono::Utc::now().to_rfc3339()),
             last_connected_at: None,
@@ -156,6 +179,12 @@ impl ConnectionProfile {
     /// Credential-store key. Derived from the id so it survives a rename.
     pub fn credential_account(&self) -> String {
         format!("connection-{}", self.id)
+    }
+
+    /// The SSH password is a different secret from the database password, so it gets its
+    /// own entry rather than overwriting the other.
+    pub fn ssh_credential_account(&self) -> String {
+        format!("ssh-{}", self.id)
     }
 
     pub fn display_name(&self) -> String {
@@ -188,6 +217,9 @@ impl ConnectionProfile {
         }
         if self.kind == DatabaseKind::Postgres && self.database.trim().is_empty() {
             return Some("Database is required for PostgreSQL.".into());
+        }
+        if self.ssh_enabled && self.ssh_host.trim().is_empty() {
+            return Some("SSH host is required when tunnelling is enabled.".into());
         }
         None
     }

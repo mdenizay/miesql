@@ -48,6 +48,7 @@ pub fn delete_profile(id: Uuid) -> R<Vec<ConnectionProfile>> {
     let mut profiles = storage::load_profiles();
     if let Some(profile) = profiles.iter().find(|p| p.id == id) {
         storage::delete_password(&profile.credential_account());
+        storage::delete_password(&profile.ssh_credential_account());
     }
     profiles.retain(|p| p.id != id);
     storage::save_profiles(&profiles)?;
@@ -96,17 +97,46 @@ fn resolve_password(profile: &ConnectionProfile, given: Option<String>) -> Optio
     })
 }
 
+/// Opens the tunnel, if the profile asks for one, and rewrites the profile to point at
+/// the local end of it. The driver is then unaware a tunnel exists at all.
+async fn open_tunnel(
+    profile: &ConnectionProfile,
+    ssh_password: Option<String>,
+) -> R<(ConnectionProfile, Option<crate::ssh::SshTunnel>)> {
+    if !profile.ssh_enabled {
+        return Ok((profile.clone(), None));
+    }
+    let ssh_password = ssh_password
+        .filter(|p| !p.is_empty())
+        .or_else(|| storage::load_password(&profile.ssh_credential_account()));
+
+    let tunnel = crate::ssh::SshTunnel::open(
+        profile,
+        ssh_password.as_deref(),
+        &profile.host,
+        profile.port,
+    )
+    .await?;
+
+    let mut tunnelled = profile.clone();
+    tunnelled.host = "127.0.0.1".into();
+    tunnelled.port = tunnel.local_port;
+    Ok((tunnelled, Some(tunnel)))
+}
+
 #[tauri::command]
 pub async fn connect(
     state: State<'_, AppState>,
     profile: ConnectionProfile,
     password: Option<String>,
+    ssh_password: Option<String>,
 ) -> R<ServerInfo> {
     let password = resolve_password(&profile, password);
     let id = profile.id;
-    let mut driver = make_driver(Credentials::new(profile, password))?;
+    let (target, tunnel) = open_tunnel(&profile, ssh_password).await?;
+    let mut driver = make_driver(Credentials::new(target, password))?;
     let info = driver.connect().await?;
-    state.insert(id, driver, info.clone()).await;
+    state.insert(id, driver, info.clone(), tunnel).await;
     Ok(info)
 }
 
@@ -310,4 +340,132 @@ pub fn credential_store_available() -> bool {
 #[tauri::command]
 pub fn data_directory() -> String {
     storage::support_dir().to_string_lossy().to_string()
+}
+
+// MARK: - Row editing
+
+/// Builds the statements for a set of grid edits without running any of them, so the user
+/// can read exactly what will happen before agreeing to it.
+#[tauri::command]
+pub async fn plan_row_edits(
+    state: State<'_, AppState>,
+    id: Uuid,
+    table: TableRef,
+    edits: Vec<crate::transfer::row_edit::RowEdit>,
+) -> R<Vec<crate::transfer::row_edit::PlannedStatement>> {
+    let session = state.get(id).await?;
+    let mut driver = session.driver.lock().await;
+    let kind = driver.kind();
+    let details = driver.describe(&table).await?;
+    drop(driver);
+
+    crate::transfer::row_edit::RowEditPlanner::new(kind, table, details.primary_key_columns())
+        .plan(&edits)
+}
+
+/// Runs statements produced by `plan_row_edits`. They go through in order and stop at the
+/// first failure, so a half-applied edit is reported rather than silently continued past.
+#[tauri::command]
+pub async fn apply_statements(
+    state: State<'_, AppState>,
+    id: Uuid,
+    statements: Vec<String>,
+) -> R<usize> {
+    let session = state.get(id).await?;
+    let mut driver = session.driver.lock().await;
+    let mut applied = 0usize;
+    for statement in statements {
+        driver.execute(&statement).await.map_err(|error| {
+            DbError::new(format!(
+                "{} statements applied before this failed.",
+                applied
+            ))
+            .with_detail(error.to_string())
+        })?;
+        applied += 1;
+    }
+    Ok(applied)
+}
+
+// MARK: - Export, dump, restore, import
+
+#[tauri::command]
+pub fn export_rows(
+    columns: Vec<ColumnInfo>,
+    rows: Vec<ResultRow>,
+    options: crate::transfer::export::ExportOptions,
+) -> String {
+    crate::transfer::export::export(&columns, &rows, &options)
+}
+
+#[tauri::command]
+pub fn write_text_file(path: String, contents: String) -> R<()> {
+    std::fs::write(&path, contents)
+        .map_err(|e| DbError::new(format!("Could not write {path}: {e}")))
+}
+
+#[tauri::command]
+pub async fn dump_database(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: Uuid,
+    tables: Vec<TableRef>,
+    options: crate::transfer::dump::DumpOptions,
+    path: String,
+) -> R<crate::transfer::dump::DumpSummary> {
+    use tauri::Emitter;
+    let session = state.get(id).await?;
+    let mut driver = session.driver.lock().await;
+    crate::transfer::dump::dump(&mut driver, &tables, &options, &path, |progress| {
+        // Emitting rather than returning: a dump of a large table can run for minutes, and
+        // a progress bar that only moves at the end is not a progress bar.
+        let _ = app.emit("dump-progress", progress);
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn run_script_file(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: Uuid,
+    path: String,
+    stop_on_error: bool,
+) -> R<crate::transfer::dump::ScriptSummary> {
+    use tauri::Emitter;
+    let script = crate::transfer::dump::read_script(&path)?;
+    let session = state.get(id).await?;
+    let mut driver = session.driver.lock().await;
+    crate::transfer::dump::run_script(&mut driver, &script, stop_on_error, |progress| {
+        let _ = app.emit("script-progress", progress);
+    })
+    .await
+}
+
+#[tauri::command]
+pub fn csv_preview(
+    path: String,
+    options: crate::transfer::csv_import::CsvOptions,
+) -> R<crate::transfer::csv_import::CsvPreview> {
+    crate::transfer::csv_import::preview(&path, &options, 20)
+}
+
+#[tauri::command]
+pub async fn csv_import(
+    state: State<'_, AppState>,
+    id: Uuid,
+    table: TableRef,
+    path: String,
+    options: crate::transfer::csv_import::CsvOptions,
+) -> R<usize> {
+    let session = state.get(id).await?;
+    let mut driver = session.driver.lock().await;
+    let statements =
+        crate::transfer::csv_import::statements(&path, &table, driver.kind(), &options)?;
+    let mut applied = 0usize;
+    for statement in &statements {
+        driver.execute(statement).await?;
+        applied += 1;
+    }
+    Ok(applied)
 }

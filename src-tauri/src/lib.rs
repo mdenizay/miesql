@@ -5,9 +5,11 @@ pub mod drivers;
 pub mod error;
 pub mod models;
 pub mod sql;
+pub mod ssh;
 pub mod state;
 pub mod storage;
 pub mod tls;
+pub mod transfer;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -54,6 +56,14 @@ pub fn run() {
             commands::set_snippets,
             commands::credential_store_available,
             commands::data_directory,
+            commands::plan_row_edits,
+            commands::apply_statements,
+            commands::export_rows,
+            commands::write_text_file,
+            commands::dump_database,
+            commands::run_script_file,
+            commands::csv_preview,
+            commands::csv_import,
         ])
         .run(tauri::generate_context!())
         .expect("error while running MieSQL");

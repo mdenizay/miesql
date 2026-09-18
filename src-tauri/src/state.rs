@@ -15,6 +15,9 @@ use uuid::Uuid;
 pub struct Session {
     pub driver: Mutex<Box<dyn Driver>>,
     pub info: ServerInfo,
+    /// Held for the life of the session: dropping it closes the forward, so the tunnel
+    /// cannot outlive the connection that needed it.
+    pub tunnel: Option<crate::ssh::SshTunnel>,
 }
 
 #[derive(Default)]
@@ -23,10 +26,17 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub async fn insert(&self, id: Uuid, driver: Box<dyn Driver>, info: ServerInfo) {
+    pub async fn insert(
+        &self,
+        id: Uuid,
+        driver: Box<dyn Driver>,
+        info: ServerInfo,
+        tunnel: Option<crate::ssh::SshTunnel>,
+    ) {
         let session = Arc::new(Session {
             driver: Mutex::new(driver),
             info,
+            tunnel,
         });
         self.sessions.lock().await.insert(id, session);
     }
