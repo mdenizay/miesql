@@ -206,19 +206,22 @@ async fn sqlite_renders_blobs_and_reals_predictably() {
 
 // MARK: - PostgreSQL
 
-fn postgres_profile() -> Option<ConnectionProfile> {
-    let parsed =
-        miesql_lib::connection_url::parse(&std::env::var("MIESQL_TEST_PG_URL").ok()?).ok()?;
-    Some(parsed.profile)
+/// Parses the test URL the same way the app would, and keeps the password with it.
+/// Dropping the password made these tests pass only against a server using trust
+/// authentication, which is why they went green locally and failed in CI.
+fn postgres_credentials() -> Option<Credentials> {
+    let url = std::env::var("MIESQL_TEST_PG_URL").ok()?;
+    let parsed = miesql_lib::connection_url::parse(&url).ok()?;
+    Some(Credentials::new(parsed.profile, parsed.password))
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn postgres_round_trips_a_table() {
-    let Some(profile) = postgres_profile() else {
+    let Some(credentials) = postgres_credentials() else {
         eprintln!("skipping: MIESQL_TEST_PG_URL is not set");
         return;
     };
-    let mut driver = make_driver(Credentials::new(profile, None)).unwrap();
+    let mut driver = make_driver(credentials).unwrap();
     let info = driver.connect().await.expect("connect");
     assert_eq!(info.product_name, "PostgreSQL");
 
@@ -307,11 +310,11 @@ async fn postgres_round_trips_a_table() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn postgres_reports_server_errors_with_their_sqlstate() {
-    let Some(profile) = postgres_profile() else {
+    let Some(credentials) = postgres_credentials() else {
         eprintln!("skipping: MIESQL_TEST_PG_URL is not set");
         return;
     };
-    let mut driver = make_driver(Credentials::new(profile, None)).unwrap();
+    let mut driver = make_driver(credentials).unwrap();
     driver.connect().await.expect("connect");
 
     let error = driver
