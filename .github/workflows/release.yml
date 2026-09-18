@@ -40,8 +40,8 @@ jobs:
       - name: Test
         run: swift test
 
-      # The runner has a full Xcode, so SwiftPM can build both slices at once. A universal
-      # binary means one download that runs on Apple Silicon and Intel alike.
+      # The script builds each slice with plain SwiftPM and joins them with lipo, so this
+      # step needs no Xcode-specific behaviour and matches what a contributor gets locally.
       - name: Build universal app
         run: ./Scripts/bundle-app.sh release --universal
 

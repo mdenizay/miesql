@@ -7,9 +7,13 @@
 #
 #   ./Scripts/bundle-app.sh [debug|release] [--universal]
 #
-# --universal produces one binary that runs on both Apple Silicon and Intel. It needs a
-# full Xcode install, because SwiftPM builds multi-architecture through xcbuild, which the
-# standalone Command Line Tools do not ship. Without it the build is for this Mac only.
+# --universal produces one binary that runs on both Apple Silicon and Intel.
+#
+# It builds each architecture separately and joins them with lipo, rather than using
+# SwiftPM's `--arch a --arch b`. That flag routes the build through xcbuild, which needs a
+# full Xcode and currently fails on this package with "duplicate output file" because the
+# executable product and its target share the name MieSQL. Two ordinary builds plus lipo
+# avoid the problem entirely and work with the Command Line Tools alone.
 
 set -euo pipefail
 
@@ -27,27 +31,48 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="MieSQL"
 BUNDLE="$ROOT/build/$APP_NAME.app"
 
-# Xcode's own tools are not required for a single-architecture build; the standalone
-# Command Line Tools are enough, and using them avoids the Xcode licence prompt on machines
-# that have never opened Xcode. A universal build does need real Xcode, so leave
-# DEVELOPER_DIR alone in that case.
-if [ "$UNIVERSAL" -eq 0 ] && [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Library/Developer/CommandLineTools ]; then
+# Xcode's own tools are not required; the standalone Command Line Tools are enough, and
+# using them avoids the Xcode licence prompt on machines that have never opened Xcode.
+if [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Library/Developer/CommandLineTools ]; then
     export DEVELOPER_DIR=/Library/Developer/CommandLineTools
 fi
 
-BUILD_ARGS=(-c "$CONFIGURATION")
-if [ "$UNIVERSAL" -eq 1 ]; then
-    BUILD_ARGS+=(--arch arm64 --arch x86_64)
-fi
+# The deployment target has to match Package.swift, or the slices disagree about it.
+DEPLOYMENT_TARGET="14.0"
 
-echo "==> Building ($CONFIGURATION$([ "$UNIVERSAL" -eq 1 ] && echo ", universal"))"
 cd "$ROOT"
-swift build "${BUILD_ARGS[@]}"
 
-BINARY="$(swift build "${BUILD_ARGS[@]}" --show-bin-path)/$APP_NAME"
-if [ ! -x "$BINARY" ]; then
-    echo "error: built binary not found at $BINARY" >&2
-    exit 1
+build_slice() {
+    # $1: triple. Echoes the path to the built binary.
+    swift build -c "$CONFIGURATION" --triple "$1" >&2
+    local path
+    path="$(swift build -c "$CONFIGURATION" --triple "$1" --show-bin-path)/$APP_NAME"
+    if [ ! -x "$path" ]; then
+        echo "error: built binary not found at $path" >&2
+        exit 1
+    fi
+    echo "$path"
+}
+
+BINARY=""
+if [ "$UNIVERSAL" -eq 1 ]; then
+    echo "==> Building ($CONFIGURATION, arm64)"
+    ARM_BINARY="$(build_slice "arm64-apple-macosx$DEPLOYMENT_TARGET")"
+    echo "==> Building ($CONFIGURATION, x86_64)"
+    INTEL_BINARY="$(build_slice "x86_64-apple-macosx$DEPLOYMENT_TARGET")"
+
+    echo "==> Joining slices"
+    mkdir -p "$ROOT/build"
+    BINARY="$ROOT/build/$APP_NAME-universal"
+    lipo -create "$ARM_BINARY" "$INTEL_BINARY" -output "$BINARY"
+else
+    echo "==> Building ($CONFIGURATION)"
+    swift build -c "$CONFIGURATION"
+    BINARY="$(swift build -c "$CONFIGURATION" --show-bin-path)/$APP_NAME"
+    if [ ! -x "$BINARY" ]; then
+        echo "error: built binary not found at $BINARY" >&2
+        exit 1
+    fi
 fi
 
 echo "==> Assembling $BUNDLE"
@@ -68,6 +93,8 @@ echo "==> Signing (ad-hoc)"
 codesign --force --sign - --timestamp=none "$BUNDLE" >/dev/null 2>&1 || {
     echo "warning: ad-hoc signing failed; the app will still run locally" >&2
 }
+
+rm -f "$ROOT/build/$APP_NAME-universal"
 
 echo "==> Done: $BUNDLE"
 echo "    $(lipo -archs "$BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || echo "unknown architecture")"
