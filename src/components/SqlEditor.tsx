@@ -4,6 +4,8 @@ import { EditorView, keymap, lineNumbers, highlightActiveLine } from "@codemirro
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { autocompletion, completionKeymap, type CompletionSource } from "@codemirror/autocomplete";
 import { sql, PostgreSQL, MySQL, SQLite, type SQLDialect } from "@codemirror/lang-sql";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { tags } from "@lezer/highlight";
 import type { DatabaseKind } from "../lib/types";
 
 interface Props {
@@ -17,6 +19,23 @@ interface Props {
   /** Table and column names from the loaded tree, so completion knows the schema. */
   schema: Record<string, string[]>;
 }
+
+/**
+ * CodeMirror ships no colours of its own, so without this the editor renders SQL as plain
+ * text. Every colour is a CSS variable, which is what lets the theme switch reach inside
+ * the editor along with the rest of the app.
+ */
+const highlightStyle = HighlightStyle.define([
+  { tag: tags.keyword, color: "var(--sql-keyword)", fontWeight: "600" },
+  { tag: [tags.string, tags.special(tags.string)], color: "var(--sql-string)" },
+  { tag: [tags.number, tags.bool, tags.null], color: "var(--sql-number)" },
+  { tag: [tags.comment, tags.lineComment, tags.blockComment], color: "var(--sql-comment)", fontStyle: "italic" },
+  { tag: [tags.typeName, tags.standard(tags.name)], color: "var(--sql-type)" },
+  { tag: tags.function(tags.variableName), color: "var(--sql-function)" },
+  { tag: [tags.operator, tags.punctuation], color: "var(--text-muted)" },
+  { tag: tags.variableName, color: "var(--text)" },
+  { tag: tags.quote, color: "var(--sql-identifier)" },
+]);
 
 function dialectFor(kind: DatabaseKind): SQLDialect {
   switch (kind) {
@@ -51,6 +70,7 @@ export function SqlEditor(props: Props) {
         props.showLineNumbers ? lineNumbers() : [],
         props.wrapLines ? EditorView.lineWrapping : [],
         autocompletion(),
+        syntaxHighlighting(highlightStyle),
         keymap.of([
           // ⌘↩ / Ctrl+↩ runs, the pair every SQL client uses.
           { key: "Mod-Enter", run: () => { onRun.current(); return true; }, preventDefault: true },
