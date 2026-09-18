@@ -308,3 +308,60 @@ button.context-item.danger:hover:not(:disabled) { background: var(--danger); col
 .cm-editor .cm-cursor { border-left-color: var(--text); }
 .cm-editor .cm-selectionBackground,
 .cm-editor.cm-focused .cm-selectionBackground { background: var(--accent-soft) !important; }
+
+/* Grid editing */
+.grid-row.selected { background: var(--accent-soft) !important; }
+.grid-row.deleted { background: var(--danger-soft) !important; }
+.grid-row.deleted .cell { text-decoration: line-through; opacity: 0.7; }
+.cell.changed { background: var(--accent-soft); font-weight: 600; }
+.cell.editing { padding: 0; }
+.cell.editing input {
+  width: 100%; height: 100%; border: 0; border-radius: 0;
+  background: var(--bg); font-family: var(--mono);
+  outline: 2px solid var(--accent); outline-offset: -2px;
+}
+
+/* Structure tables */
+.struct { padding: 12px 14px; overflow: auto; }
+.struct h3 {
+  margin: 14px 0 6px; font-size: 11px; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.struct h3:first-child { margin-top: 0; }
+.struct table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.struct th {
+  text-align: left; font-weight: 600; color: var(--text-muted);
+  border-bottom: 1px solid var(--border-strong); padding: 4px 8px; white-space: nowrap;
+}
+.struct td {
+  padding: 3px 8px; border-bottom: 1px solid var(--border);
+  font-family: var(--mono); user-select: text; white-space: nowrap;
+}
+.struct tr:hover td { background: var(--bg-raised); }
+.struct .muted { color: var(--text-faint); }
+
+.ddl {
+  margin: 0; padding: 14px; overflow: auto; flex: 1;
+  font-family: var(--mono); font-size: 12px; white-space: pre;
+  user-select: text; background: var(--bg);
+}
+
+/* Progress rows in the transfer sheets */
+.progress-row { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.progress-row .progress { flex: 1; }
+.failure-list { max-height: 160px; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+.failure-list .sql { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+
+/* History and snippet lists */
+.list { flex: 1; overflow: auto; }
+.list-item {
+  padding: 7px 10px; border-bottom: 1px solid var(--border); cursor: default;
+}
+.list-item:hover { background: var(--bg-raised); }
+.list-item .meta {
+  display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted);
+}
+.list-item .sql {
+  font-family: var(--mono); font-size: 12px; margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}

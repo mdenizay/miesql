@@ -19,6 +19,11 @@ export interface ConnectionProfile {
   folder: string;
   colorHex: string | null;
   connectTimeoutSeconds: number;
+  sshEnabled: boolean;
+  sshHost: string;
+  sshPort: number;
+  sshUsername: string;
+  sshKeyPath: string;
   notes: string;
   createdAt: string | null;
   lastConnectedAt: string | null;
@@ -176,4 +181,74 @@ export function subtitle(profile: ConnectionProfile): string {
  *  their way. Mirrors DatabaseKind::is_relational on the Rust side. */
 export function isRelational(kind: DatabaseKind): boolean {
   return kind === "postgres" || kind === "mysql" || kind === "mariadb" || kind === "sqlite";
+}
+
+export type RowEdit =
+  | { kind: "update"; rowId: number; changes: Record<string, SqlValue>; original: Record<string, SqlValue> }
+  | { kind: "insert"; rowId: number; values: Record<string, SqlValue> }
+  | { kind: "delete"; rowId: number; original: Record<string, SqlValue> };
+
+export interface PlannedStatement {
+  sql: string;
+  rowId: number;
+}
+
+export type ExportFormat = "csv" | "tsv" | "json" | "sqlInsert" | "markdown";
+
+export interface DumpOptions {
+  includeSchema: boolean;
+  includeData: boolean;
+  dropIfExists: boolean;
+  wrapInTransaction: boolean;
+  rowsPerInsert: number;
+}
+
+export interface DumpProgress {
+  currentTable: string;
+  tableIndex: number;
+  tableCount: number;
+  rowsWritten: number;
+  bytesWritten: number;
+}
+
+export interface DumpSummary {
+  tables: number;
+  rows: number;
+  bytes: number;
+  path: string;
+}
+
+export interface ScriptProgress {
+  statementIndex: number;
+  statementCount: number;
+  succeeded: number;
+  failed: number;
+}
+
+export interface ScriptSummary {
+  total: number;
+  succeeded: number;
+  failures: { statement: string; message: string }[];
+  durationMs: number;
+}
+
+export interface CsvOptions {
+  delimiter: string;
+  hasHeaderRow: boolean;
+  nullMarker: string;
+  rowsPerInsert: number;
+  columnMapping: Record<number, string>;
+}
+
+export interface CsvPreview {
+  header: string[];
+  rows: string[][];
+  totalRows: number;
+}
+
+export interface Snippet {
+  id: string;
+  name: string;
+  sql: string;
+  updatedAt: string;
 }

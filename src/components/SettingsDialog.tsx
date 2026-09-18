@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { LANGUAGES, type LanguageCode, type Translate } from "../lib/i18n";
 import type { AppSettings } from "../lib/types";
 import type { useUpdater } from "../lib/useUpdater";
 
 interface Props {
   settings: AppSettings;
+  t: Translate;
   onChange: (settings: AppSettings) => void;
   updater: ReturnType<typeof useUpdater>;
   onClose: () => void;
 }
 
-export function SettingsDialog({ settings, onChange, updater, onClose }: Props) {
+export function SettingsDialog({ settings, t, onChange, updater, onClose }: Props) {
   const [dataDir, setDataDir] = useState("");
   const patch = (changes: Partial<AppSettings>) => onChange({ ...settings, ...changes });
 
@@ -21,20 +23,34 @@ export function SettingsDialog({ settings, onChange, updater, onClose }: Props) 
   return (
     <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="dialog">
-        <h2>Settings</h2>
+        <h2>{t("settings.title")}</h2>
         <div className="dialog-body">
           <div className="field">
-            <label>Appearance</label>
+            <label>{t("settings.appearance")}</label>
             <select value={settings.appearance} onChange={(e) => patch({ appearance: e.target.value as never })}>
-              <option value="system">System</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
+              <option value="system">{t("settings.system")}</option>
+              <option value="light">{t("settings.light")}</option>
+              <option value="dark">{t("settings.dark")}</option>
+            </select>
+          </div>
+
+          <div className="field">
+            <label>{t("settings.language")}</label>
+            <select
+              value={settings.languageCode}
+              onChange={(e) => patch({ languageCode: e.target.value as LanguageCode })}
+            >
+              {LANGUAGES.map((language) => (
+                <option key={language.code} value={language.code}>
+                  {language.label}
+                </option>
+              ))}
             </select>
           </div>
 
           <div className="row">
             <div className="field" style={{ flex: 1 }}>
-              <label>Editor font size</label>
+              <label>{t("settings.editorFont")}</label>
               <input
                 type="number"
                 value={settings.editorFontSize}
@@ -42,7 +58,7 @@ export function SettingsDialog({ settings, onChange, updater, onClose }: Props) 
               />
             </div>
             <div className="field" style={{ flex: 1 }}>
-              <label>Grid font size</label>
+              <label>{t("settings.gridFont")}</label>
               <input
                 type="number"
                 value={settings.gridFontSize}
@@ -57,7 +73,7 @@ export function SettingsDialog({ settings, onChange, updater, onClose }: Props) 
               checked={settings.showLineNumbers}
               onChange={(e) => patch({ showLineNumbers: e.target.checked })}
             />
-            Show line numbers
+            {t("settings.lineNumbers")}
           </label>
           <label className="check">
             <input
@@ -65,19 +81,38 @@ export function SettingsDialog({ settings, onChange, updater, onClose }: Props) 
               checked={settings.wrapLongLines}
               onChange={(e) => patch({ wrapLongLines: e.target.checked })}
             />
-            Wrap long lines
+            {t("settings.wrapLines")}
           </label>
 
-          <div className="field">
-            <label>Maximum rows per query</label>
-            <input
-              type="number"
-              value={settings.maxResultRows}
-              onChange={(e) => patch({ maxResultRows: Number(e.target.value) || 50000 })}
-            />
+          <div className="row">
+            <div className="field" style={{ flex: 1 }}>
+              <label>{t("settings.pageSize")}</label>
+              <input
+                type="number"
+                value={settings.pageSize}
+                onChange={(e) => patch({ pageSize: Number(e.target.value) || 200 })}
+              />
+            </div>
+            <div className="field" style={{ flex: 1 }}>
+              <label>{t("settings.maxRows")}</label>
+              <input
+                type="number"
+                value={settings.maxResultRows}
+                onChange={(e) => patch({ maxResultRows: Number(e.target.value) || 50000 })}
+              />
+            </div>
           </div>
 
-          <hr style={{ border: 0, borderTop: "1px solid var(--border)", width: "100%" }} />
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={settings.confirmDestructiveStatements}
+              onChange={(e) => patch({ confirmDestructiveStatements: e.target.checked })}
+            />
+            {t("settings.confirmDestructive")}
+          </label>
+
+          <hr className="divider" />
 
           <label className="check">
             <input
@@ -85,7 +120,7 @@ export function SettingsDialog({ settings, onChange, updater, onClose }: Props) 
               checked={settings.checkForUpdates}
               onChange={(e) => patch({ checkForUpdates: e.target.checked })}
             />
-            Check for updates at launch
+            {t("settings.checkUpdates")}
           </label>
           <label className="check">
             <input
@@ -94,36 +129,32 @@ export function SettingsDialog({ settings, onChange, updater, onClose }: Props) 
               disabled={!settings.checkForUpdates}
               onChange={(e) => patch({ downloadUpdatesAutomatically: e.target.checked })}
             />
-            Download updates automatically
+            {t("settings.autoDownload")}
           </label>
-          <div className="hint">
-            An update is never applied on its own: it installs when you choose to restart,
-            so it cannot interrupt a query.
-          </div>
+          <div className="hint">{t("settings.updateHint")}</div>
 
           <div className="row">
             <button onClick={() => void updater.checkNow()} disabled={updater.stage.kind === "checking"}>
-              {updater.stage.kind === "checking" ? "Checking…" : "Check now"}
+              {t("settings.checkNow")}
             </button>
             {updater.stage.kind === "failed" && <span className="bad">{updater.stage.message}</span>}
-            {updater.stage.kind === "idle" && <span className="hint">Up to date.</span>}
-            {updater.stage.kind === "ready" && <span className="good">{updater.stage.version} ready.</span>}
+            {updater.stage.kind === "idle" && <span className="hint">{t("settings.upToDate")}</span>}
+            {updater.stage.kind === "ready" && (
+              <span className="good">{t("update.ready", updater.stage.version)}</span>
+            )}
           </div>
 
-          <hr style={{ border: 0, borderTop: "1px solid var(--border)", width: "100%" }} />
-
-          <div className="hint">
-            MieSQL stores everything on this device. It makes no network calls except to the
-            databases you connect to and, if enabled above, the update check.
-          </div>
+          <hr className="divider" />
+          <div className="hint">{t("settings.privacy")}</div>
           <div className="field">
-            <label>Data is stored at</label>
+            <label>{t("settings.dataLocation")}</label>
             <input readOnly value={dataDir} style={{ fontFamily: "var(--mono)", fontSize: 11 }} />
           </div>
         </div>
 
         <div className="dialog-footer">
-          <button className="primary" onClick={onClose}>Done</button>
+          <div className="spacer" />
+          <button className="primary" onClick={onClose}>{t("general.done")}</button>
         </div>
       </div>
     </div>
