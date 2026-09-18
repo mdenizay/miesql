@@ -44,6 +44,10 @@ async fn an_unreachable_ssh_host_fails_quickly_and_says_why() {
     );
 }
 
+// Checked with pgrep, which Windows has no equivalent of worth shimming. The behaviour it
+// guards — kill_on_drop plus an explicit start_kill — is not platform-specific, so covering
+// it on Unix covers it.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn the_tunnel_does_not_leave_a_process_behind_when_it_fails() {
     let profile = tunnelled_profile("127.0.0.1", 1);
