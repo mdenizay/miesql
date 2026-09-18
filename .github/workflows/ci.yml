@@ -98,18 +98,8 @@ jobs:
         env:
           MIESQL_TEST_PG_URL: postgres://postgres:miesql@127.0.0.1:5432/miesql_test?sslmode=disable
           MIESQL_TEST_PG: host=127.0.0.1 port=5432 user=postgres password=miesql dbname=miesql_test
+          PGPASSWORD: miesql
         run: |
-          # The protocol spike asserts the claim the driver design rests on, so it needs
-          # the probe table the tests read from.
-          PGPASSWORD=miesql psql -h 127.0.0.1 -U postgres -d miesql_test -v ON_ERROR_STOP=1 <<'SQL'
-          CREATE TABLE types_probe (
-            id serial PRIMARY KEY, name text NOT NULL, amount numeric(12,4),
-            ratio double precision, when_ts timestamptz, when_d date, flag boolean,
-            ident uuid, doc jsonb, tags text[], raw bytea
-          );
-          INSERT INTO types_probe (name, amount, ratio, when_ts, when_d, flag, ident, doc, tags, raw)
-          VALUES ('ada', 1234.5600, 0.5, '2026-01-02 03:04:05+00', '2026-01-02', true,
-                  '12345678-9abc-def0-1234-56789abcdef0', '{"k":[1,2]}', ARRAY['a','b'], '\x00ff10');
-          INSERT INTO types_probe (name) VALUES ('nulls');
-          SQL
+          psql -h 127.0.0.1 -U postgres -d miesql_test -v ON_ERROR_STOP=1 \
+            -f src-tauri/tests/fixtures/pg-probe.sql
           cargo test --manifest-path src-tauri/Cargo.toml
