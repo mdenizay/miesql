@@ -123,6 +123,32 @@ jobs:
           includeUpdaterJson: true
           args: ${{ matrix.args }}
 
+      # Tauri notarises the .app, but the disk image that wraps it is only signed. A
+      # downloaded .dmg with no ticket of its own is what Gatekeeper actually assesses when
+      # someone double-clicks it, so without this the warning we set out to remove is still
+      # there on the path most people take. Verified by downloading the v0.2.1 dmg and
+      # watching spctl reject it until it was stapled.
+      - name: Notarise and staple the disk image
+        if: matrix.os == 'macos-15' && env.HAS_APPLE_KEY == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          HAS_APPLE_KEY: ${{ secrets.APPLE_API_KEY_BASE64 != '' }}
+        run: |
+          set -euo pipefail
+          DMG=$(ls src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          echo "Notarising $DMG"
+          xcrun notarytool submit "$DMG" \
+            --key "$RUNNER_TEMP/AuthKey.p8" \
+            --key-id "${{ secrets.APPLE_API_KEY_ID }}" \
+            --issuer "${{ secrets.APPLE_API_ISSUER }}" \
+            --wait --timeout 30m
+          xcrun stapler staple "$DMG"
+          # Fail loudly rather than shipping a disk image that still warns.
+          xcrun stapler validate "$DMG"
+          spctl -a -vvv -t open --context context:primary-signature "$DMG"
+          gh release upload "$TAG" "$DMG" --clobber
+
   publish:
     name: Publish
     needs: build
