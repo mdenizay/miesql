@@ -12,8 +12,11 @@ on:
 permissions:
   contents: write
 
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
 jobs:
-  release:
+  build:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -63,12 +66,23 @@ jobs:
       - name: Check the tag matches the app version
         shell: bash
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
           CONFIG_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           if [ "$CONFIG_VERSION" != "${TAG#v}" ]; then
             echo "::error::Tag is $TAG but tauri.conf.json says $CONFIG_VERSION. Bump one of them."
             exit 1
           fi
+
+      # tauri-action takes the release body as a string. Handing it a path publishes the
+      # path itself, so the file is read into a step output first.
+      - name: Read the release notes
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo "body<<RELEASE_NOTES_EOF"
+            cat .github/RELEASE_NOTES.md
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: tauri-apps/tauri-action@v0
         env:
@@ -78,12 +92,46 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.event.inputs.tag || github.ref_name }}
-          releaseName: MieSQL ${{ github.event.inputs.tag || github.ref_name }}
-          releaseBody: ${{ github.workspace }}/.github/RELEASE_NOTES.md
-          releaseDraft: false
+          tagName: ${{ env.TAG }}
+          releaseName: MieSQL ${{ env.TAG }}
+          releaseBody: ${{ steps.notes.outputs.body }}
+          # Drafted on purpose: three jobs write to one release, so publishing on the first
+          # to finish would show a release carrying only macOS files while Linux and
+          # Windows are still building. The job below publishes it once they all land.
+          releaseDraft: true
           prerelease: false
           # tauri-action writes latest.json from the signed artifacts of every matrix job,
-          # which is exactly what the updater endpoint reads.
+          # which is exactly what the in-app updater reads.
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+  publish:
+    name: Publish
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check every platform produced its artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view "$TAG" --json assets --jq '.assets[].name' | sort | tee assets.txt
+          # A release missing a platform is worse than a late one, and latest.json is what
+          # the updater reads — without it the in-app check finds nothing.
+          missing=0
+          for pattern in '[.]dmg$' '[.]app[.]tar[.]gz$' '[.]exe$' '[.]AppImage$' '[.]deb$' '^latest[.]json$'; do
+            if ! grep -qE "$pattern" assets.txt; then
+              echo "::error::No asset matching $pattern"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::Refusing to publish an incomplete release."
+            exit 1
+          fi
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release edit "$TAG" --draft=false --latest

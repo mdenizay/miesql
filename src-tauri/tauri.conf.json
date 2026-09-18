@@ -61,7 +61,7 @@
     },
     "windows": {
       "nsis": {
-        "installMode": "perMachine"
+        "installMode": "currentUser"
       }
     },
     "createUpdaterArtifacts": true
