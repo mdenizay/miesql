@@ -356,3 +356,169 @@ fn saving_a_password_twice_overwrites_it() {
     miesql_lib::storage::delete_password(&account);
     assert_eq!(miesql_lib::storage::load_password(&account), None);
 }
+
+// MARK: - MySQL and MariaDB
+
+/// Skipped unless MIESQL_TEST_MYSQL_URL points at a server. CI starts one; locally a
+/// throwaway instance on a spare port does the job.
+fn mysql_credentials() -> Option<Credentials> {
+    let url = std::env::var("MIESQL_TEST_MYSQL_URL").ok()?;
+    let parsed = miesql_lib::connection_url::parse(&url).ok()?;
+    Some(Credentials::new(parsed.profile, parsed.password))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mysql_round_trips_a_table() {
+    let Some(credentials) = mysql_credentials() else {
+        eprintln!("skipping: MIESQL_TEST_MYSQL_URL is not set");
+        return;
+    };
+    let database = credentials.profile.database.clone();
+    let mut driver = make_driver(credentials).unwrap();
+
+    let info = driver.connect().await.expect("connect");
+    // MySQL 9 defaults accounts to caching_sha2_password, which cannot authenticate over a
+    // plaintext socket — reaching this line means the TLS path works.
+    assert!(info.product_name == "MySQL" || info.product_name == "MariaDB");
+    assert_eq!(info.current_database, database);
+
+    let results = driver
+        .execute("SELECT id, name, balance FROM users ORDER BY id")
+        .await
+        .unwrap();
+    let result = &results[0];
+    assert_eq!(
+        result
+            .columns
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["id", "name", "balance"]
+    );
+    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows[0].values[1].as_str(), "Ada Lovelace");
+    // DECIMAL keeps its scale, because the server rendered it, not us.
+    assert_eq!(result.rows[0].values[2].as_str(), "1234.5600");
+    assert!(result.rows[2].values[2].is_null());
+
+    // The v0.1.0 limitation is gone here too: metadata arrives with the result set, not
+    // with the rows.
+    let empty = driver
+        .execute("SELECT id, name FROM users WHERE 1 = 0")
+        .await
+        .unwrap();
+    assert!(empty[0].rows.is_empty());
+    assert_eq!(
+        empty[0]
+            .columns
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["id", "name"]
+    );
+
+    let updated = driver
+        .execute("UPDATE users SET age = age + 1 WHERE id <= 2")
+        .await
+        .unwrap();
+    assert_eq!(updated[0].rows_affected, Some(2));
+
+    driver.disconnect().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mysql_reads_structure() {
+    let Some(credentials) = mysql_credentials() else {
+        eprintln!("skipping: MIESQL_TEST_MYSQL_URL is not set");
+        return;
+    };
+    let database = credentials.profile.database.clone();
+    let mut driver = make_driver(credentials).unwrap();
+    driver.connect().await.expect("connect");
+
+    let tables = driver.list_tables(&database, "").await.unwrap();
+    let mut names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
+    names.sort();
+    assert_eq!(names, vec!["orders", "users"]);
+
+    let users = tables.iter().find(|t| t.name == "users").unwrap().clone();
+    let details = driver.describe(&users).await.unwrap();
+    assert_eq!(details.primary_key_columns(), vec!["id"]);
+    assert!(
+        details
+            .columns
+            .iter()
+            .find(|c| c.name == "id")
+            .unwrap()
+            .is_auto_increment
+    );
+    assert!(
+        !details
+            .columns
+            .iter()
+            .find(|c| c.name == "name")
+            .unwrap()
+            .is_nullable
+    );
+    assert!(
+        details
+            .columns
+            .iter()
+            .find(|c| c.name == "bio")
+            .unwrap()
+            .is_nullable
+    );
+    assert!(details
+        .indexes
+        .iter()
+        .any(|i| i.name == "idx_users_email" && i.columns == vec!["email"]));
+    assert_eq!(details.comment.as_deref(), Some("people"));
+
+    let orders = tables.iter().find(|t| t.name == "orders").unwrap().clone();
+    let order_details = driver.describe(&orders).await.unwrap();
+    let key = order_details
+        .foreign_keys
+        .iter()
+        .find(|k| k.name == "fk_orders_user")
+        .expect("foreign key");
+    assert_eq!(key.columns, vec!["user_id"]);
+    assert_eq!(key.referenced_table, "users");
+    assert_eq!(key.on_delete.as_deref(), Some("CASCADE"));
+
+    // MySQL answers this one itself rather than having it rebuilt from the catalog.
+    let ddl = driver.create_statement(&users).await.unwrap();
+    assert!(ddl.contains("CREATE TABLE"));
+    assert!(ddl.contains("`users`"));
+
+    assert_eq!(driver.count_rows(&users, "").await.unwrap(), 3);
+    assert_eq!(driver.count_rows(&users, "age > 40").await.unwrap(), 2);
+
+    driver.disconnect().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mysql_reports_server_errors_and_honours_read_only() {
+    let Some(credentials) = mysql_credentials() else {
+        eprintln!("skipping: MIESQL_TEST_MYSQL_URL is not set");
+        return;
+    };
+
+    let mut driver = make_driver(credentials.clone()).unwrap();
+    driver.connect().await.expect("connect");
+    let error = driver
+        .execute("SELECT * FROM table_that_is_not_there")
+        .await
+        .unwrap_err();
+    // 42S02 is the SQLSTATE for an unknown table; the server's own wording is kept.
+    assert_eq!(error.code.as_deref(), Some("42S02"));
+    driver.disconnect().await;
+
+    let mut read_only = credentials;
+    read_only.profile.read_only = true;
+    let mut guarded = make_driver(read_only).unwrap();
+    guarded.connect().await.expect("connect");
+    assert!(guarded.execute("SELECT 1").await.is_ok());
+    let blocked = guarded.execute("DELETE FROM users").await.unwrap_err();
+    assert_eq!(blocked.code.as_deref(), Some("MIESQL_READONLY"));
+    guarded.disconnect().await;
+}

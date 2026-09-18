@@ -4,6 +4,7 @@
 //! the grid, the exporters, the clipboard and the dumper on one code path, and it is why
 //! each driver uses its engine's *text* protocol where one exists.
 
+pub mod mysql;
 pub mod postgres;
 pub mod sqlite;
 
@@ -86,8 +87,15 @@ pub trait Driver: Send {
 }
 
 pub fn make_driver(credentials: Credentials) -> DbResult<Box<dyn Driver>> {
+    // Every connection comes through here, including from tests, so this is the one place
+    // that guarantees TLS is ready before a driver reaches for it.
+    crate::tls::ensure_crypto_provider();
+
     match credentials.profile.kind {
         DatabaseKind::Postgres => Ok(Box::new(postgres::PostgresDriver::new(credentials))),
+        DatabaseKind::Mysql | DatabaseKind::Mariadb => {
+            Ok(Box::new(mysql::MySqlDriver::new(credentials)))
+        }
         DatabaseKind::Sqlite => Ok(Box::new(sqlite::SqliteDriver::new(credentials))),
         other => Err(DbError::new(format!(
             "{} support is not implemented yet.",

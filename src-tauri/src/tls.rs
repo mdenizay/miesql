@@ -65,6 +65,19 @@ impl ServerCertVerifier for AcceptAnyServerCert {
     }
 }
 
+/// Installs ring as the process-wide default.
+///
+/// rustls refuses to guess when more than one provider is compiled in, and the way it
+/// refuses is a panic from inside whichever driver happens to open a connection first.
+/// Naming the provider once at startup turns that into a decision rather than a crash.
+pub fn ensure_crypto_provider() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // An error here means something else installed one first, which is equally fine.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 fn provider() -> Arc<rustls::crypto::CryptoProvider> {
     Arc::new(rustls::crypto::ring::default_provider())
 }

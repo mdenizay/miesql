@@ -80,8 +80,8 @@ jobs:
       # `npm run build` type-checks with tsc before Vite bundles, so a type error fails here.
       - run: npm run build
 
-  postgres:
-    name: PostgreSQL integration
+  integration:
+    name: Database integration
     runs-on: ubuntu-22.04
     services:
       postgres:
@@ -93,6 +93,17 @@ jobs:
         options: >-
           --health-cmd pg_isready --health-interval 5s
           --health-timeout 5s --health-retries 10
+      mysql:
+        image: mysql:9
+        env:
+          MYSQL_ROOT_PASSWORD: miesql
+          MYSQL_DATABASE: miesql_test
+          MYSQL_USER: miesql
+          MYSQL_PASSWORD: sifre123
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -pmiesql"
+          --health-interval 5s --health-timeout 5s --health-retries 20
 
     steps:
       - uses: actions/checkout@v5
@@ -111,10 +122,15 @@ jobs:
         env:
           MIESQL_TEST_PG_URL: postgres://postgres:miesql@127.0.0.1:5432/miesql_test?sslmode=disable
           MIESQL_TEST_PG: host=127.0.0.1 port=5432 user=postgres password=miesql dbname=miesql_test
+          # MySQL 9 accounts default to caching_sha2_password, which cannot authenticate
+          # over a plaintext socket — so this URL also exercises the TLS path.
+          MIESQL_TEST_MYSQL_URL: mysql://miesql:sifre123@127.0.0.1:3306/miesql_test?sslmode=require
           PGPASSWORD: miesql
         run: |
           psql -h 127.0.0.1 -U postgres -d miesql_test -v ON_ERROR_STOP=1 \
             -f src-tauri/tests/fixtures/pg-probe.sql
+          mysql -h 127.0.0.1 -P 3306 -u miesql -psifre123 miesql_test \
+            < src-tauri/tests/fixtures/mysql-probe.sql
           dbus-run-session -- bash -c '
             echo "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1
             cargo test --manifest-path src-tauri/Cargo.toml
