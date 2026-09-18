@@ -89,7 +89,11 @@ impl SqliteDriver {
         let is_read = dialect::is_read_only_statement(sql);
         Ok(QueryResult {
             statement: sql.to_string(),
-            columns: if column_count > 0 { columns } else { Vec::new() },
+            columns: if column_count > 0 {
+                columns
+            } else {
+                Vec::new()
+            },
             rows,
             rows_affected: if column_count == 0 && !is_read {
                 Some(connection.changes())
@@ -141,7 +145,9 @@ impl Driver for SqliteDriver {
         // declared constraints rather than silently letting the user break them.
         let _ = self.run_single("PRAGMA foreign_keys = ON");
 
-        let version = self.scalar("SELECT sqlite_version()")?.unwrap_or_else(|| "unknown".into());
+        let version = self
+            .scalar("SELECT sqlite_version()")?
+            .unwrap_or_else(|| "unknown".into());
         Ok(ServerInfo {
             product_name: "SQLite".into(),
             version,
@@ -198,7 +204,11 @@ impl Driver for SqliteDriver {
 
     async fn list_tables(&mut self, database: &str, _schema: &str) -> DbResult<Vec<TableRef>> {
         let dialect = Dialect::new(DatabaseKind::Sqlite);
-        let prefix = if database.is_empty() { MAIN_DATABASE } else { database };
+        let prefix = if database.is_empty() {
+            MAIN_DATABASE
+        } else {
+            database
+        };
         let sql = format!(
             "SELECT name, type FROM {}.sqlite_master \
              WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name",
@@ -259,9 +269,15 @@ impl Driver for SqliteDriver {
             let mut indexes = Vec::new();
             for row in &index_list.rows {
                 // seq, name, unique, origin, partial
-                let get = |i: usize| row.values.get(i).map(|v| v.as_str().to_string()).unwrap_or_default();
+                let get = |i: usize| {
+                    row.values
+                        .get(i)
+                        .map(|v| v.as_str().to_string())
+                        .unwrap_or_default()
+                };
                 let name = get(1);
-                let info = self.run_single(&format!("PRAGMA index_info({})", dialect.quote(&name)))?;
+                let info =
+                    self.run_single(&format!("PRAGMA index_info({})", dialect.quote(&name)))?;
                 indexes.push(IndexDefinition {
                     columns: info
                         .rows
@@ -279,7 +295,12 @@ impl Driver for SqliteDriver {
             let mut keys: Vec<ForeignKeyDefinition> = Vec::new();
             for row in &fk_rows.rows {
                 // id, seq, table, from, to, on_update, on_delete, match
-                let get = |i: usize| row.values.get(i).map(|v| v.as_str().to_string()).unwrap_or_default();
+                let get = |i: usize| {
+                    row.values
+                        .get(i)
+                        .map(|v| v.as_str().to_string())
+                        .unwrap_or_default()
+                };
                 let name = format!("fk_{}_{}", table.name, get(0));
                 match keys.iter_mut().find(|k| k.name == name) {
                     Some(existing) => {
@@ -319,8 +340,9 @@ impl Driver for SqliteDriver {
         let name_literal = dialect.string_literal(&table.name);
 
         tokio::task::block_in_place(|| {
-            let result =
-                self.run_single(&format!("SELECT sql FROM sqlite_master WHERE name = {name_literal}"))?;
+            let result = self.run_single(&format!(
+                "SELECT sql FROM sqlite_master WHERE name = {name_literal}"
+            ))?;
             let sql = result
                 .rows
                 .first()
@@ -331,7 +353,11 @@ impl Driver for SqliteDriver {
                     DbError::new(format!("No CREATE statement is stored for {}.", table.name))
                 })?;
 
-            let mut output = if sql.ends_with(';') { sql } else { format!("{sql};") };
+            let mut output = if sql.ends_with(';') {
+                sql
+            } else {
+                format!("{sql};")
+            };
 
             let indexes = self.run_single(&format!(
                 "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = {name_literal} \

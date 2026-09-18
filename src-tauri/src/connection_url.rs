@@ -62,7 +62,9 @@ pub fn parse(raw_input: &str) -> Result<ParsedConnectionUrl> {
         input.clone()
     };
 
-    let colon = body.find(':').ok_or(ConnectionUrlError::UnrecognisedFormat)?;
+    let colon = body
+        .find(':')
+        .ok_or(ConnectionUrlError::UnrecognisedFormat)?;
     let scheme = body[..colon].to_lowercase();
     let mut remainder = body[colon + 1..].to_string();
     // `scheme://rest` and `scheme:rest` are both seen in the wild.
@@ -135,7 +137,11 @@ pub fn parse(raw_input: &str) -> Result<ParsedConnectionUrl> {
 
     let mut warnings = Vec::new();
     let mut profile = ConnectionProfile::new(kind);
-    profile.host = if host.is_empty() { "127.0.0.1".into() } else { host };
+    profile.host = if host.is_empty() {
+        "127.0.0.1".into()
+    } else {
+        host
+    };
     profile.port = port;
     profile.username = username.clone();
     profile.database = database;
@@ -163,7 +169,11 @@ pub fn parse(raw_input: &str) -> Result<ParsedConnectionUrl> {
 
 /// Rebuilds a URL from a profile. The password is left out unless asked for, so
 /// "Copy Connection URL" is safe to paste into a ticket.
-pub fn to_string(profile: &ConnectionProfile, password: Option<&str>, include_password: bool) -> String {
+pub fn to_string(
+    profile: &ConnectionProfile,
+    password: Option<&str>,
+    include_password: bool,
+) -> String {
     if profile.kind.is_file_based() {
         return format!("sqlite://{}", profile.file_path);
     }
@@ -301,7 +311,11 @@ fn split_host_and_port(input: &str, default_port: u16) -> Result<(String, u16)> 
     Ok((percent_decoded(&candidate[..colon]), port))
 }
 
-fn apply_query(query: &[(String, String)], profile: &mut ConnectionProfile, warnings: &mut Vec<String>) {
+fn apply_query(
+    query: &[(String, String)],
+    profile: &mut ConnectionProfile,
+    warnings: &mut Vec<String>,
+) {
     for (raw_key, raw_value) in query {
         let key = raw_key.to_lowercase().replace(['-', '_'], "");
         let value = raw_value.to_lowercase();
@@ -315,8 +329,11 @@ fn apply_query(query: &[(String, String)], profile: &mut ConnectionProfile, warn
             "connecttimeout" | "timeout" | "connecttimeoutms" => {
                 if let Ok(seconds) = value.parse::<u64>() {
                     // Some drivers express this in milliseconds; anything huge is clearly that.
-                    profile.connect_timeout_seconds =
-                        if seconds > 600 { (seconds / 1000).max(1) } else { seconds.max(1) };
+                    profile.connect_timeout_seconds = if seconds > 600 {
+                        (seconds / 1000).max(1)
+                    } else {
+                        seconds.max(1)
+                    };
                 }
             }
             "mode" => {
@@ -354,10 +371,8 @@ fn apply_query(query: &[(String, String)], profile: &mut ConnectionProfile, warn
                     }
                 }
             }
-            "applicationname" | "appname" => {
-                if profile.name.is_empty() {
-                    profile.name = raw_value.clone();
-                }
+            "applicationname" | "appname" if profile.name.is_empty() => {
+                profile.name = raw_value.clone();
             }
             _ => {}
         }
@@ -447,12 +462,17 @@ fn parse_keyword_value(input: &str) -> Result<ParsedConnectionUrl> {
     }
 
     let get = |name: &str| -> Option<String> {
-        pairs.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone())
+        pairs
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.clone())
     };
 
     let mut warnings = Vec::new();
     let mut profile = ConnectionProfile::new(DatabaseKind::Postgres);
-    profile.host = get("host").or_else(|| get("hostaddr")).unwrap_or_else(default_host);
+    profile.host = get("host")
+        .or_else(|| get("hostaddr"))
+        .unwrap_or_else(default_host);
     profile.port = get("port")
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or_else(|| DatabaseKind::Postgres.default_port());
@@ -461,7 +481,9 @@ fn parse_keyword_value(input: &str) -> Result<ParsedConnectionUrl> {
         .or_else(|| get("database"))
         .unwrap_or_else(|| profile.username.clone());
 
-    let known = ["host", "hostaddr", "port", "user", "username", "dbname", "database", "password"];
+    let known = [
+        "host", "hostaddr", "port", "user", "username", "dbname", "database", "password",
+    ];
     let extras: Vec<(String, String)> = pairs
         .iter()
         .filter(|(k, _)| !known.contains(&k.as_str()))
@@ -537,7 +559,9 @@ fn looks_like_path(input: &str) -> bool {
         return true;
     }
     let lowered = input.to_lowercase();
-    [".sqlite", ".sqlite3", ".db"].iter().any(|ext| lowered.ends_with(ext))
+    [".sqlite", ".sqlite3", ".db"]
+        .iter()
+        .any(|ext| lowered.ends_with(ext))
 }
 
 fn expand_tilde(path: &str) -> String {

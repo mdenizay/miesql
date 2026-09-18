@@ -29,7 +29,14 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg", "nsis", "deb", "rpm", "appimage"],
+    "targets": [
+      "app",
+      "dmg",
+      "nsis",
+      "deb",
+      "rpm",
+      "appimage"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -43,7 +50,10 @@
     "copyright": "MIT licensed. https://github.com/mdenizay/miesql",
     "linux": {
       "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0"
+        ]
       }
     },
     "macOS": {
@@ -53,7 +63,19 @@
       "nsis": {
         "installMode": "perMachine"
       }
-    }
+    },
+    "createUpdaterArtifacts": true
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/mdenizay/miesql/releases/latest/download/latest.json"
+      ],
+      "dialog": false,
+      "windows": {
+        "installMode": "passive"
+      },
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERDRTRDQTRCRTEzRTIxNTgKUldSWUlUN2hTOHJrM0dnMnJBQkhFNFQvK3k4UDVPSGNMaGFEQ05DYUhnK0pteUtZY3dETklKbTYK"
+    }
+  }
 }

@@ -44,7 +44,9 @@ impl PostgresDriver {
             .port(profile.port)
             .user(&profile.username)
             .dbname(database)
-            .connect_timeout(std::time::Duration::from_secs(profile.connect_timeout_seconds));
+            .connect_timeout(std::time::Duration::from_secs(
+                profile.connect_timeout_seconds,
+            ));
         if let Some(password) = &self.credentials.password {
             config.password(password);
         }
@@ -110,9 +112,7 @@ impl PostgresDriver {
                 SimpleQueryMessage::Row(row) => {
                     if columns.is_empty() {
                         columns = (0..row.len())
-                            .map(|index| {
-                                ColumnInfo::new(index, row.columns()[index].name(), "")
-                            })
+                            .map(|index| ColumnInfo::new(index, row.columns()[index].name(), ""))
                             .collect();
                     }
                     let values = (0..columns.len())
@@ -123,12 +123,11 @@ impl PostgresDriver {
                         values,
                     });
                 }
-                SimpleQueryMessage::CommandComplete(count) => {
-                    // For SELECT this just repeats the row count, which would be
-                    // misleading shown as "rows affected".
-                    if columns.is_empty() {
-                        rows_affected = Some(*count);
-                    }
+                // For SELECT the tag just repeats the row count, which would be
+                // misleading shown as "rows affected", so it is only read when the
+                // statement produced no columns.
+                SimpleQueryMessage::CommandComplete(count) if columns.is_empty() => {
+                    rows_affected = Some(*count);
                 }
                 _ => {}
             }
@@ -173,7 +172,10 @@ impl Driver for PostgresDriver {
         };
         self.open(&database).await?;
 
-        let version = self.scalar("SHOW server_version").await?.unwrap_or_else(|| "unknown".into());
+        let version = self
+            .scalar("SHOW server_version")
+            .await?
+            .unwrap_or_else(|| "unknown".into());
         let current_database = self
             .scalar("SELECT current_database()")
             .await?
@@ -276,8 +278,7 @@ impl Driver for PostgresDriver {
         let dialect = Dialect::new(DatabaseKind::Postgres);
         let schema_literal = dialect.string_literal(&table.schema);
         let table_literal = dialect.string_literal(&table.name);
-        let qualified_literal =
-            dialect.string_literal(&format!("{}.{}", table.schema, table.name));
+        let qualified_literal = dialect.string_literal(&format!("{}.{}", table.schema, table.name));
 
         let column_rows = self
             .run_single(&format!(
@@ -335,7 +336,12 @@ impl Driver for PostgresDriver {
             .rows
             .iter()
             .map(|row| {
-                let get = |i: usize| row.values.get(i).map(|v| v.as_str().to_string()).unwrap_or_default();
+                let get = |i: usize| {
+                    row.values
+                        .get(i)
+                        .map(|v| v.as_str().to_string())
+                        .unwrap_or_default()
+                };
                 IndexDefinition {
                     name: get(0),
                     columns: columns_from_index_definition(&get(4)),
@@ -446,8 +452,11 @@ impl Driver for PostgresDriver {
 
         for key in &details.foreign_keys {
             let columns: Vec<String> = key.columns.iter().map(|c| dialect.quote(c)).collect();
-            let referenced: Vec<String> =
-                key.referenced_columns.iter().map(|c| dialect.quote(c)).collect();
+            let referenced: Vec<String> = key
+                .referenced_columns
+                .iter()
+                .map(|c| dialect.quote(c))
+                .collect();
             sql.push_str(&format!(
                 "\n\nALTER TABLE {} ADD CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({});",
                 dialect.qualified(table),
@@ -519,10 +528,16 @@ pub fn parse_foreign_key(name: String, definition: &str) -> Option<ForeignKeyDef
         let marker = format!("ON {keyword} ");
         let at = definition.find(&marker)? + marker.len();
         let rest = &definition[at..];
-        ["NO ACTION", "SET NULL", "SET DEFAULT", "CASCADE", "RESTRICT"]
-            .iter()
-            .find(|candidate| rest.starts_with(*candidate))
-            .map(|c| c.to_string())
+        [
+            "NO ACTION",
+            "SET NULL",
+            "SET DEFAULT",
+            "CASCADE",
+            "RESTRICT",
+        ]
+        .iter()
+        .find(|candidate| rest.starts_with(*candidate))
+        .map(|c| c.to_string())
     };
 
     Some(ForeignKeyDefinition {

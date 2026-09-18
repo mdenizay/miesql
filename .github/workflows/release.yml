@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to build and release, e.g. v0.1.0"
+        description: "Tag to build and release, e.g. v0.2.0"
         required: true
 
 permissions:
@@ -14,59 +14,76 @@ permissions:
 
 jobs:
   release:
-    name: Build and publish
-    runs-on: macos-15
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # One universal macOS build rather than two, so there is a single download that
+          # runs on Apple Silicon and Intel alike.
+          - os: macos-15
+            label: macOS (universal)
+            args: --target universal-apple-darwin
+          - os: ubuntu-22.04
+            label: Linux (deb, rpm, AppImage)
+            args: ""
+          - os: windows-latest
+            label: Windows (installer)
+            args: ""
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - name: Resolve version
-        id: version
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-15' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Check the tag matches the app version
+        shell: bash
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Check the tag matches Info.plist
-        run: |
-          PLIST_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)
-          if [ "$PLIST_VERSION" != "${{ steps.version.outputs.version }}" ]; then
-            echo "::error::Tag is ${{ steps.version.outputs.tag }} but Info.plist says $PLIST_VERSION. Bump one of them."
+          CONFIG_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "$CONFIG_VERSION" != "${TAG#v}" ]; then
+            echo "::error::Tag is $TAG but tauri.conf.json says $CONFIG_VERSION. Bump one of them."
             exit 1
           fi
 
-      - name: Test
-        run: swift test
-
-      # The script builds each slice with plain SwiftPM and joins them with lipo, so this
-      # step needs no Xcode-specific behaviour and matches what a contributor gets locally.
-      - name: Build universal app
-        run: ./Scripts/bundle-app.sh release --universal
-
-      - name: Verify the bundle
-        run: |
-          lipo -archs build/MieSQL.app/Contents/MacOS/MieSQL
-          lipo -archs build/MieSQL.app/Contents/MacOS/MieSQL | grep -q arm64
-          lipo -archs build/MieSQL.app/Contents/MacOS/MieSQL | grep -q x86_64
-          codesign --verify --verbose build/MieSQL.app
-
-      # ditto, not zip: it preserves the bundle's symlinks and metadata, which a plain zip
-      # mangles badly enough that the app will not launch after unpacking.
-      - name: Package
-        run: |
-          ditto -c -k --keepParent build/MieSQL.app "MieSQL-${{ steps.version.outputs.tag }}-macos-universal.zip"
-          shasum -a 256 "MieSQL-${{ steps.version.outputs.tag }}-macos-universal.zip" > SHA256SUMS.txt
-          cat SHA256SUMS.txt
-
-      - name: Publish release
+      - uses: tauri-apps/tauri-action@v0
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "${{ steps.version.outputs.tag }}" \
-            --title "MieSQL ${{ steps.version.outputs.tag }}" \
-            --notes-file .github/RELEASE_NOTES.md \
-            --verify-tag \
-            "MieSQL-${{ steps.version.outputs.tag }}-macos-universal.zip" \
-            SHA256SUMS.txt
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the updater artifacts. Without these the update check would find a
+          # release it refuses to install, which is worse than not publishing one.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: MieSQL ${{ github.event.inputs.tag || github.ref_name }}
+          releaseBody: ${{ github.workspace }}/.github/RELEASE_NOTES.md
+          releaseDraft: false
+          prerelease: false
+          # tauri-action writes latest.json from the signed artifacts of every matrix job,
+          # which is exactly what the updater endpoint reads.
+          includeUpdaterJson: true
+          args: ${{ matrix.args }}

@@ -143,7 +143,10 @@ pub fn split(sql: &str, kind: DatabaseKind) -> Vec<Statement> {
 /// past the final semicolon belongs to the statement before it.
 pub fn statement_at(sql: &str, offset: usize, kind: DatabaseKind) -> Option<Statement> {
     let statements = split(sql, kind);
-    if let Some(found) = statements.iter().find(|s| offset >= s.start && offset <= s.end) {
+    if let Some(found) = statements
+        .iter()
+        .find(|s| offset >= s.start && offset <= s.end)
+    {
         return Some(found.clone());
     }
     statements.iter().rev().find(|s| s.end <= offset).cloned()

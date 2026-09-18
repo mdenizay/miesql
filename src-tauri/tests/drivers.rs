@@ -15,8 +15,11 @@ fn sqlite_profile(path: &str) -> ConnectionProfile {
 
 async fn sqlite_driver(dir: &tempfile::TempDir, name: &str) -> Box<dyn Driver> {
     let path = dir.path().join(name);
-    let mut driver =
-        make_driver(Credentials::new(sqlite_profile(path.to_str().unwrap()), None)).unwrap();
+    let mut driver = make_driver(Credentials::new(
+        sqlite_profile(path.to_str().unwrap()),
+        None,
+    ))
+    .unwrap();
     driver.connect().await.expect("connect");
     driver
 }
@@ -108,7 +111,14 @@ async fn sqlite_reads_columns_indexes_and_foreign_keys() {
         vec!["id", "name", "email", "age", "balance", "bio"]
     );
     assert_eq!(details.primary_key_columns(), vec!["id"]);
-    assert!(!details.columns.iter().find(|c| c.name == "name").unwrap().is_nullable);
+    assert!(
+        !details
+            .columns
+            .iter()
+            .find(|c| c.name == "name")
+            .unwrap()
+            .is_nullable
+    );
     assert!(details
         .indexes
         .iter()
@@ -183,7 +193,10 @@ async fn sqlite_renders_blobs_and_reals_predictably() {
         .await
         .unwrap();
 
-    let result = &driver.execute("SELECT r, whole, blob FROM t").await.unwrap()[0];
+    let result = &driver
+        .execute("SELECT r, whole, blob FROM t")
+        .await
+        .unwrap()[0];
     let row = &result.rows[0];
     assert_eq!(row.values[0].as_str(), "1250.75");
     // A whole float prints without a trailing .0 so a dump round-trips unchanged.
@@ -194,7 +207,8 @@ async fn sqlite_renders_blobs_and_reals_predictably() {
 // MARK: - PostgreSQL
 
 fn postgres_profile() -> Option<ConnectionProfile> {
-    let parsed = miesql_lib::connection_url::parse(&std::env::var("MIESQL_TEST_PG_URL").ok()?).ok()?;
+    let parsed =
+        miesql_lib::connection_url::parse(&std::env::var("MIESQL_TEST_PG_URL").ok()?).ok()?;
     Some(parsed.profile)
 }
 
@@ -252,9 +266,30 @@ async fn postgres_round_trips_a_table() {
     let table = TableRef::new(&info.current_database, "public", "driver_probe");
     let details = driver.describe(&table).await.unwrap();
     assert_eq!(details.primary_key_columns(), vec!["id"]);
-    assert!(details.columns.iter().find(|c| c.name == "id").unwrap().is_auto_increment);
-    assert!(!details.columns.iter().find(|c| c.name == "name").unwrap().is_nullable);
-    assert!(details.columns.iter().find(|c| c.name == "amount").unwrap().is_nullable);
+    assert!(
+        details
+            .columns
+            .iter()
+            .find(|c| c.name == "id")
+            .unwrap()
+            .is_auto_increment
+    );
+    assert!(
+        !details
+            .columns
+            .iter()
+            .find(|c| c.name == "name")
+            .unwrap()
+            .is_nullable
+    );
+    assert!(
+        details
+            .columns
+            .iter()
+            .find(|c| c.name == "amount")
+            .unwrap()
+            .is_nullable
+    );
     assert!(details
         .indexes
         .iter()
@@ -279,7 +314,10 @@ async fn postgres_reports_server_errors_with_their_sqlstate() {
     let mut driver = make_driver(Credentials::new(profile, None)).unwrap();
     driver.connect().await.expect("connect");
 
-    let error = driver.execute("SELECT * FROM table_that_is_not_there").await.unwrap_err();
+    let error = driver
+        .execute("SELECT * FROM table_that_is_not_there")
+        .await
+        .unwrap_err();
     // 42P01 is undefined_table; showing the server's own code is more useful than ours.
     assert_eq!(error.code.as_deref(), Some("42P01"));
     assert!(error.message.contains("table_that_is_not_there"));

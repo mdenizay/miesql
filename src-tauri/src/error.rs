@@ -31,7 +31,11 @@ impl DbError {
 
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         let detail = detail.into();
-        self.detail = if detail.is_empty() { None } else { Some(detail) };
+        self.detail = if detail.is_empty() {
+            None
+        } else {
+            Some(detail)
+        };
         self
     }
 

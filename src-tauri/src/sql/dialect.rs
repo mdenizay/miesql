@@ -92,7 +92,11 @@ impl Dialect {
             let terms: Vec<String> = order_by
                 .iter()
                 .map(|(column, ascending)| {
-                    format!("{} {}", self.quote(column), if *ascending { "ASC" } else { "DESC" })
+                    format!(
+                        "{} {}",
+                        self.quote(column),
+                        if *ascending { "ASC" } else { "DESC" }
+                    )
                 })
                 .collect();
             sql.push_str(&format!(" ORDER BY {}", terms.join(", ")));
@@ -117,7 +121,15 @@ impl Dialect {
 pub fn is_read_only_statement(sql: &str) -> bool {
     matches!(
         leading_keyword(sql).as_str(),
-        "select" | "show" | "explain" | "describe" | "desc" | "with" | "pragma" | "values" | "table"
+        "select"
+            | "show"
+            | "explain"
+            | "describe"
+            | "desc"
+            | "with"
+            | "pragma"
+            | "values"
+            | "table"
     )
 }
 

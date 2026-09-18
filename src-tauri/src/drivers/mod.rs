@@ -59,8 +59,13 @@ pub trait Driver: Send {
         limit: u64,
         offset: u64,
     ) -> DbResult<QueryResult> {
-        let sql = Dialect::new(self.kind())
-            .select_statement(table, where_clause, order_by, limit, offset);
+        let sql = Dialect::new(self.kind()).select_statement(
+            table,
+            where_clause,
+            order_by,
+            limit,
+            offset,
+        );
         self.execute(&sql)
             .await?
             .into_iter()

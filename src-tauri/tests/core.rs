@@ -31,7 +31,8 @@ fn ignores_semicolons_inside_comments() {
 
 #[test]
 fn handles_dollar_quoting() {
-    let sql = "CREATE FUNCTION f() RETURNS int AS $$ BEGIN RETURN 1; END; $$ LANGUAGE plpgsql; SELECT 1";
+    let sql =
+        "CREATE FUNCTION f() RETURNS int AS $$ BEGIN RETURN 1; END; $$ LANGUAGE plpgsql; SELECT 1";
     let statements = splitter::split(sql, DatabaseKind::Postgres);
     assert_eq!(statements.len(), 2);
     assert!(statements[0].text.contains("BEGIN RETURN 1; END;"));
@@ -66,13 +67,22 @@ fn finds_the_statement_under_the_caret() {
 #[test]
 fn quotes_identifiers_per_engine() {
     assert_eq!(Dialect::new(DatabaseKind::Mysql).quote("users"), "`users`");
-    assert_eq!(Dialect::new(DatabaseKind::Postgres).quote("users"), "\"users\"");
-    assert_eq!(Dialect::new(DatabaseKind::Sqlite).quote("users"), "\"users\"");
+    assert_eq!(
+        Dialect::new(DatabaseKind::Postgres).quote("users"),
+        "\"users\""
+    );
+    assert_eq!(
+        Dialect::new(DatabaseKind::Sqlite).quote("users"),
+        "\"users\""
+    );
 }
 
 #[test]
 fn doubles_embedded_quote_characters() {
-    assert_eq!(Dialect::new(DatabaseKind::Mysql).quote("we`ird"), "`we``ird`");
+    assert_eq!(
+        Dialect::new(DatabaseKind::Mysql).quote("we`ird"),
+        "`we``ird`"
+    );
     assert_eq!(
         Dialect::new(DatabaseKind::Postgres).quote("we\"ird"),
         "\"we\"\"ird\""
@@ -130,7 +140,8 @@ fn builds_paged_select_statements() {
 
 #[test]
 fn parses_a_full_postgres_url() {
-    let parsed = connection_url::parse("postgres://admin:s3cret@db.example.com:6432/analytics").unwrap();
+    let parsed =
+        connection_url::parse("postgres://admin:s3cret@db.example.com:6432/analytics").unwrap();
     assert_eq!(parsed.profile.kind, DatabaseKind::Postgres);
     assert_eq!(parsed.profile.host, "db.example.com");
     assert_eq!(parsed.profile.port, 6432);
@@ -152,15 +163,24 @@ fn accepts_every_postgres_scheme_spelling() {
 #[test]
 fn tells_mysql_and_mariadb_apart() {
     assert_eq!(
-        connection_url::parse("mysql://root@localhost/shop").unwrap().profile.kind,
+        connection_url::parse("mysql://root@localhost/shop")
+            .unwrap()
+            .profile
+            .kind,
         DatabaseKind::Mysql
     );
     assert_eq!(
-        connection_url::parse("mariadb://root@localhost/shop").unwrap().profile.kind,
+        connection_url::parse("mariadb://root@localhost/shop")
+            .unwrap()
+            .profile
+            .kind,
         DatabaseKind::Mariadb
     );
     assert_eq!(
-        connection_url::parse("mysql://root@localhost/shop").unwrap().profile.port,
+        connection_url::parse("mysql://root@localhost/shop")
+            .unwrap()
+            .profile
+            .port,
         3306
     );
 }
@@ -168,11 +188,17 @@ fn tells_mysql_and_mariadb_apart() {
 #[test]
 fn recognises_the_new_engines() {
     assert_eq!(
-        connection_url::parse("redis://localhost:6379").unwrap().profile.kind,
+        connection_url::parse("redis://localhost:6379")
+            .unwrap()
+            .profile
+            .kind,
         DatabaseKind::Redis
     );
     assert_eq!(
-        connection_url::parse("mongodb://user:pw@localhost:27017/app").unwrap().profile.kind,
+        connection_url::parse("mongodb://user:pw@localhost:27017/app")
+            .unwrap()
+            .profile
+            .kind,
         DatabaseKind::Mongodb
     );
 }
@@ -259,30 +285,54 @@ fn warns_that_verify_full_is_downgraded() {
 
 #[test]
 fn reads_timeouts_and_read_only_flags() {
-    let timeout = |url: &str| connection_url::parse(url).unwrap().profile.connect_timeout_seconds;
+    let timeout = |url: &str| {
+        connection_url::parse(url)
+            .unwrap()
+            .profile
+            .connect_timeout_seconds
+    };
     assert_eq!(timeout("postgres://u@h/d?connect_timeout=30"), 30);
     // Millisecond-style values are converted rather than taken as a 30000-second wait.
     assert_eq!(timeout("postgres://u@h/d?connectTimeout=30000"), 30);
-    assert!(connection_url::parse("postgres://u@h/d?readonly=true").unwrap().profile.read_only);
+    assert!(
+        connection_url::parse("postgres://u@h/d?readonly=true")
+            .unwrap()
+            .profile
+            .read_only
+    );
 }
 
 #[test]
 fn parses_sqlite_urls_and_bare_paths() {
     let path = |url: &str| connection_url::parse(url).unwrap().profile.file_path;
-    assert_eq!(path("sqlite:///Users/ada/app.sqlite"), "/Users/ada/app.sqlite");
+    assert_eq!(
+        path("sqlite:///Users/ada/app.sqlite"),
+        "/Users/ada/app.sqlite"
+    );
     assert_eq!(path("file:///tmp/data.db"), "/tmp/data.db");
     assert_eq!(path("/Users/ada/app.sqlite"), "/Users/ada/app.sqlite");
     assert_eq!(path("./local.db"), "./local.db");
 
     assert_eq!(
-        connection_url::parse("/Users/ada/app.sqlite").unwrap().profile.kind,
+        connection_url::parse("/Users/ada/app.sqlite")
+            .unwrap()
+            .profile
+            .kind,
         DatabaseKind::Sqlite
     );
     assert_eq!(
-        connection_url::parse("sqlite:///var/db/inventory.sqlite").unwrap().profile.name,
+        connection_url::parse("sqlite:///var/db/inventory.sqlite")
+            .unwrap()
+            .profile
+            .name,
         "inventory"
     );
-    assert!(connection_url::parse("sqlite:///tmp/a.db?mode=ro").unwrap().profile.read_only);
+    assert!(
+        connection_url::parse("sqlite:///tmp/a.db?mode=ro")
+            .unwrap()
+            .profile
+            .read_only
+    );
 }
 
 #[test]
@@ -319,7 +369,10 @@ fn strips_quotes_and_an_env_var_prefix() {
 
 #[test]
 fn rejects_what_it_cannot_understand() {
-    assert_eq!(connection_url::parse("   ").unwrap_err(), ConnectionUrlError::Empty);
+    assert_eq!(
+        connection_url::parse("   ").unwrap_err(),
+        ConnectionUrlError::Empty
+    );
     assert_eq!(
         connection_url::parse("amqp://localhost:5672").unwrap_err(),
         ConnectionUrlError::UnsupportedScheme("amqp".into())
@@ -333,12 +386,24 @@ fn rejects_what_it_cannot_understand() {
 
 #[test]
 fn recognises_candidates_without_parsing_them() {
-    assert!(connection_url::looks_like_connection_url("postgres://u@h/d"));
-    assert!(connection_url::looks_like_connection_url("jdbc:mysql://h/d"));
-    assert!(connection_url::looks_like_connection_url("/Users/ada/app.sqlite"));
-    assert!(connection_url::looks_like_connection_url("host=localhost dbname=app"));
-    assert!(!connection_url::looks_like_connection_url("SELECT * FROM users"));
-    assert!(!connection_url::looks_like_connection_url("https://example.com"));
+    assert!(connection_url::looks_like_connection_url(
+        "postgres://u@h/d"
+    ));
+    assert!(connection_url::looks_like_connection_url(
+        "jdbc:mysql://h/d"
+    ));
+    assert!(connection_url::looks_like_connection_url(
+        "/Users/ada/app.sqlite"
+    ));
+    assert!(connection_url::looks_like_connection_url(
+        "host=localhost dbname=app"
+    ));
+    assert!(!connection_url::looks_like_connection_url(
+        "SELECT * FROM users"
+    ));
+    assert!(!connection_url::looks_like_connection_url(
+        "https://example.com"
+    ));
     assert!(!connection_url::looks_like_connection_url(""));
 }
 

@@ -52,7 +52,10 @@ impl DatabaseKind {
     /// Whether the engine speaks SQL at all. Redis and MongoDB do not, and the parts of
     /// the UI that assume SQL — the formatter, the dump, the row editor — stay hidden.
     pub fn is_relational(self) -> bool {
-        matches!(self, Self::Postgres | Self::Mysql | Self::Mariadb | Self::Sqlite)
+        matches!(
+            self,
+            Self::Postgres | Self::Mysql | Self::Mariadb | Self::Sqlite
+        )
     }
 
     pub fn default_user(self) -> &'static str {
@@ -250,9 +253,11 @@ impl ColumnInfo {
     /// Right-aligns numerics in the grid.
     pub fn is_numeric(&self) -> bool {
         let t = self.type_name.to_lowercase();
-        ["int", "num", "dec", "float", "double", "real", "serial", "money"]
-            .iter()
-            .any(|needle| t.contains(needle))
+        [
+            "int", "num", "dec", "float", "double", "real", "serial", "money",
+        ]
+        .iter()
+        .any(|needle| t.contains(needle))
     }
 }
 
@@ -318,7 +323,11 @@ pub struct TableRef {
 }
 
 impl TableRef {
-    pub fn new(database: impl Into<String>, schema: impl Into<String>, name: impl Into<String>) -> Self {
+    pub fn new(
+        database: impl Into<String>,
+        schema: impl Into<String>,
+        name: impl Into<String>,
+    ) -> Self {
         Self {
             database: database.into(),
             schema: schema.into(),
