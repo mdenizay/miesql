@@ -747,12 +747,20 @@ async fn mysql_cancels_a_running_query() {
     });
 
     let started = std::time::Instant::now();
-    let outcome = driver.execute("SELECT SLEEP(30)").await;
+    let outcome = driver.execute("SELECT SLEEP(30)").await.expect("query ran");
 
-    assert!(outcome.is_err(), "the query should have been killed");
+    // `SLEEP` is the one statement that does not fail when killed: MySQL documents it as
+    // returning 1 if interrupted and 0 if it ran to completion, so success here is the
+    // expected outcome and the return value is what says the kill landed. An ordinary
+    // long query does surface error 1317 instead.
     assert!(
         started.elapsed() < std::time::Duration::from_secs(10),
         "KILL QUERY should land while the statement is still running"
+    );
+    assert_eq!(
+        outcome[0].rows[0].values[0].as_str(),
+        "1",
+        "SLEEP reports 1 only when something interrupted it"
     );
     let after = driver.execute("SELECT 1").await.expect("still connected");
     assert_eq!(after[0].rows.len(), 1);
