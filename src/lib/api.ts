@@ -59,11 +59,14 @@ export const api = {
 
   executeSql: (id: string, sql: string, maxRows: number) =>
     invoke<QueryResult[]>("execute_sql", { id, sql, maxRows }),
+  cancelQuery: (id: string) => invoke<void>("cancel_query", { id }),
   listDatabases: (id: string) => invoke<string[]>("list_databases", { id }),
   listSchemas: (id: string, database: string) =>
     invoke<string[]>("list_schemas", { id, database }),
   listTables: (id: string, database: string, schema: string) =>
     invoke<TableRef[]>("list_tables", { id, database, schema }),
+  schemaColumns: (id: string, database: string, schema: string) =>
+    invoke<Record<string, string[]>>("schema_columns", { id, database, schema }),
   describeTable: (id: string, table: TableRef) =>
     invoke<TableDetails>("describe_table", { id, table }),
   createStatement: (id: string, table: TableRef) =>
@@ -96,11 +99,18 @@ export const api = {
   applyStatements: (id: string, statements: string[]) =>
     invoke<number>("apply_statements", { id, statements }),
 
-  exportRows: (columns: ColumnInfo[], rows: ResultRow[], format: ExportFormat, tableName: string, kind: string) =>
+  exportRows: (
+    columns: ColumnInfo[],
+    rows: ResultRow[],
+    format: ExportFormat,
+    tableName: string,
+    kind: string,
+    includeHeader = true,
+  ) =>
     invoke<string>("export_rows", {
       columns,
       rows,
-      options: { format, includeHeader: true, nullPlaceholder: "", tableName, kind },
+      options: { format, includeHeader, nullPlaceholder: "", tableName, kind },
     }),
   writeTextFile: (path: string, contents: string) =>
     invoke<void>("write_text_file", { path, contents }),

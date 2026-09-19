@@ -3,18 +3,35 @@
 //! inside `block_in_place`, which hands the work to a blocking thread instead of stalling
 //! the async runtime while a large query runs.
 
-use super::{Credentials, Driver};
+use super::{CancelSlot, Canceller, Credentials, Driver};
 use crate::error::{DbError, DbResult};
 use crate::models::*;
 use crate::sql::{dialect, dialect::Dialect, splitter};
 use async_trait::async_trait;
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, InterruptHandle, OpenFlags};
+use std::sync::Arc;
 
 pub const MAIN_DATABASE: &str = "main";
 
 pub struct SqliteDriver {
     credentials: Credentials,
     connection: Option<Connection>,
+    cancel: CancelSlot,
+}
+
+/// SQLite runs in this process, so there is no second connection to send anything over:
+/// the interrupt handle sets a flag the running statement checks, and the call returns
+/// straight away rather than waiting for the statement to notice.
+struct SqliteCanceller {
+    handle: InterruptHandle,
+}
+
+#[async_trait]
+impl Canceller for SqliteCanceller {
+    async fn cancel(&self) -> DbResult<()> {
+        self.handle.interrupt();
+        Ok(())
+    }
 }
 
 impl SqliteDriver {
@@ -22,6 +39,7 @@ impl SqliteDriver {
         Self {
             credentials,
             connection: None,
+            cancel: CancelSlot::default(),
         }
     }
 
@@ -126,6 +144,10 @@ impl Driver for SqliteDriver {
         self.connection.is_some()
     }
 
+    fn cancel_slot(&self) -> CancelSlot {
+        self.cancel.clone()
+    }
+
     async fn connect(&mut self) -> DbResult<ServerInfo> {
         let path = self.credentials.profile.file_path.clone();
         if path.is_empty() {
@@ -139,6 +161,9 @@ impl Driver for SqliteDriver {
         } | OpenFlags::SQLITE_OPEN_FULL_MUTEX;
 
         let connection = Connection::open_with_flags(&path, flags).map_err(map_error)?;
+        self.cancel.set(Arc::new(SqliteCanceller {
+            handle: connection.get_interrupt_handle(),
+        }));
         self.connection = Some(connection);
 
         // Foreign keys are off by default; a database client should honour the schema's
@@ -160,6 +185,7 @@ impl Driver for SqliteDriver {
     }
 
     async fn disconnect(&mut self) {
+        self.cancel.clear();
         self.connection = None;
     }
 
@@ -333,6 +359,23 @@ impl Driver for SqliteDriver {
                 comment: None,
             })
         })
+    }
+
+    async fn schema_columns(
+        &mut self,
+        _database: &str,
+        _schema: &str,
+    ) -> DbResult<std::collections::BTreeMap<String, Vec<String>>> {
+        // `pragma_table_info` as a table-valued function is what keeps this to one query
+        // instead of one PRAGMA per table.
+        let rows = tokio::task::block_in_place(|| {
+            self.run_single(
+                "SELECT m.name, p.name FROM sqlite_master m \
+                 JOIN pragma_table_info(m.name) p \
+                 WHERE m.type IN ('table', 'view') ORDER BY m.name, p.cid",
+            )
+        })?;
+        Ok(super::group_columns(&rows))
     }
 
     async fn create_statement(&mut self, table: &TableRef) -> DbResult<String> {

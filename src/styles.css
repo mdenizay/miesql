@@ -310,9 +310,13 @@ button.context-item.danger:hover:not(:disabled) { background: var(--danger); col
 .cm-editor.cm-focused .cm-selectionBackground { background: var(--accent-soft) !important; }
 
 /* Grid editing */
+.grid { outline: none; }
 .grid-row.selected { background: var(--accent-soft) !important; }
 .grid-row.deleted { background: var(--danger-soft) !important; }
 .grid-row.deleted .cell { text-decoration: line-through; opacity: 0.7; }
+/* A row being added is marked on its edge rather than by a fill, so the per-cell
+   "changed" highlight stays readable on top of it. */
+.grid-row.added { background: var(--bg-sunken) !important; box-shadow: inset 2px 0 0 var(--accent); }
 .cell.changed { background: var(--accent-soft); font-weight: 600; }
 .cell.editing { padding: 0; }
 .cell.editing input {

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { EditorState, Compartment } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightActiveLine } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { autocompletion, completionKeymap, type CompletionSource } from "@codemirror/autocomplete";
 import { sql, PostgreSQL, MySQL, SQLite, type SQLDialect } from "@codemirror/lang-sql";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
@@ -12,6 +13,9 @@ interface Props {
   value: string;
   onChange: (value: string) => void;
   onRun: () => void;
+  /** The highlighted text, or "" when nothing is selected. Lets the caller run a
+   *  selection instead of the whole script without reaching into the editor. */
+  onSelectionChange?: (selection: string) => void;
   kind: DatabaseKind;
   fontSize: number;
   showLineNumbers: boolean;
@@ -61,10 +65,15 @@ export function SqlEditor(props: Props) {
   const view = useRef<EditorView | null>(null);
   const language = useRef(new Compartment());
   const theme = useRef(new Compartment());
-  // Held in a ref so the run shortcut always calls the current handler without having to
-  // rebuild the editor on every render.
+  // The editor is built once, so its listeners close over the props of that first render.
+  // Every callback therefore goes through a ref: without this, switching to a second query
+  // tab would keep the handlers of the first, and typing would write into the wrong tab.
   const onRun = useRef(props.onRun);
   onRun.current = props.onRun;
+  const onChange = useRef(props.onChange);
+  onChange.current = props.onChange;
+  const onSelectionChange = useRef(props.onSelectionChange);
+  onSelectionChange.current = props.onSelectionChange;
 
   useEffect(() => {
     if (!host.current || view.current) return;
@@ -77,11 +86,15 @@ export function SqlEditor(props: Props) {
         props.showLineNumbers ? lineNumbers() : [],
         props.wrapLines ? EditorView.lineWrapping : [],
         autocompletion(),
+        // ⌘F, and the highlight that shows the other matches while the panel is open.
+        search({ top: true }),
+        highlightSelectionMatches(),
         syntaxHighlighting(highlightStyle),
         keymap.of([
           // ⌘↩ / Ctrl+↩ runs, the pair every SQL client uses.
           { key: "Mod-Enter", run: () => { onRun.current(); return true; }, preventDefault: true },
           indentWithTab,
+          ...searchKeymap,
           ...defaultKeymap,
           ...historyKeymap,
           ...completionKeymap,
@@ -89,7 +102,11 @@ export function SqlEditor(props: Props) {
         language.current.of(languageFor(props.kind, props.schema)),
         theme.current.of(EditorView.theme({ "&": { fontSize: `${props.fontSize}px` } })),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) props.onChange(update.state.doc.toString());
+          if (update.docChanged) onChange.current(update.state.doc.toString());
+          if (update.docChanged || update.selectionSet) {
+            const { from, to } = update.state.selection.main;
+            onSelectionChange.current?.(update.state.sliceDoc(from, to));
+          }
         }),
       ],
     });

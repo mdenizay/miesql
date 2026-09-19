@@ -1,6 +1,6 @@
 [package]
 name = "miesql"
-version = "0.3.0"
+version = "1.0.0"
 description = "A fast, native SQL client"
 authors = ["mdenizay"]
 license = "MIT"
@@ -60,7 +60,6 @@ mysql_async = { version = "0.37", default-features = false, features = ["default
 rusqlite = { version = "0.40", features = ["bundled", "column_decltype"] }
 
 redis = { version = "0.32", features = ["tokio-comp", "tokio-rustls-comp"] }
-mongodb = "3"
 async-trait = "0.1.92"
 tauri-plugin-updater = "2.0.0-rc.4"
 tauri-plugin-process = "2.0.0-rc.1"
@@ -69,6 +68,12 @@ tauri-plugin-clipboard-manager = "2.1.0-beta.7"
 [dev-dependencies]
 tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
+
+[profile.dev]
+# Full debug info on a tree this size costs several gigabytes of disk and a noticeable
+# part of every link. Line tables keep backtraces and panic locations readable, which is
+# what the tests and the doctor actually need.
+debug = "line-tables-only"
 
 [profile.release]
 codegen-units = 1

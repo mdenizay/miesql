@@ -12,7 +12,7 @@
 //! Every listing goes through SCAN rather than KEYS, because KEYS blocks the server for
 //! the length of the keyspace and this is a tool people will point at production.
 
-use super::{Credentials, Driver};
+use super::{CancelSlot, Credentials, Driver};
 use crate::error::{DbError, DbResult};
 use crate::models::*;
 use async_trait::async_trait;
@@ -27,6 +27,10 @@ pub struct RedisDriver {
     credentials: Credentials,
     conn: Option<MultiplexedConnection>,
     active_database: i64,
+    /// Never filled. Redis runs one command at a time and returns quickly; there is no
+    /// equivalent of `KILL QUERY` that stops a command without dropping the connection,
+    /// so an empty slot is the accurate answer rather than a cancel that only pretends.
+    cancel: CancelSlot,
 }
 
 impl RedisDriver {
@@ -35,6 +39,7 @@ impl RedisDriver {
             credentials,
             conn: None,
             active_database: 0,
+            cancel: CancelSlot::default(),
         }
     }
 
@@ -249,6 +254,10 @@ impl Driver for RedisDriver {
 
     fn is_connected(&self) -> bool {
         self.conn.is_some()
+    }
+
+    fn cancel_slot(&self) -> CancelSlot {
+        self.cancel.clone()
     }
 
     async fn connect(&mut self) -> DbResult<ServerInfo> {

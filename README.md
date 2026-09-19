@@ -8,9 +8,9 @@ bundled Chromium, no telemetry. Everything you create — connection profiles, q
 history, settings — stays on your machine, and the app makes no network calls other than
 to the databases you point it at and, if you leave it on, the update check.
 
-> **Status: early but usable.** Supports **PostgreSQL, MySQL, MariaDB, SQLite and Redis**.
-> MongoDB and Firebase are not implemented. See [Limitations](#limitations) for the honest
-> list of what is still missing.
+> **Status: 1.0.** Supports **PostgreSQL, MySQL, MariaDB, SQLite and Redis**. MongoDB and
+> Firebase are not implemented. See [Limitations](#limitations) for the honest list of
+> what is still missing.
 
 ## Download
 
@@ -53,22 +53,33 @@ npm run app:build
 - Test the connection before saving it
 
 **Querying**
-- SQL editor with syntax highlighting and schema-aware completion, using your own table
-  and database names rather than just keywords
-- `⌘↩` / `Ctrl+↩` to run; multiple query tabs
+- SQL editor with syntax highlighting and schema-aware completion — **table *and* column
+  names** from the database you are connected to, fetched in one query per schema
+- `⌘↩` / `Ctrl+↩` to run — the highlighted text when there is a selection, the whole
+  script otherwise
+- **Stop a running query.** PostgreSQL cancels over its own protocol, MySQL and MariaDB
+  through `KILL QUERY` on a second login, SQLite by interrupt. In every case the session
+  survives: you keep your transaction, your temporary tables and your database
+- `⌘F` to search the editor; `⌘T`, `⌘W`, `⌘N`, `⌘R`, `⌘,` and `⌘.` for tabs, connections,
+  refresh, settings and stop
+- Multiple query tabs
 - Multi-statement scripts split correctly around string literals, comments, PostgreSQL
   dollar quoting and MySQL `DELIMITER`
 - Virtualised result grid: only visible rows exist in the DOM, so scrolling 100k rows costs
   what scrolling 10 does
-- `NULL` is always distinct from the empty string, in the grid and in exports
+- `NULL` is always distinct from the empty string — in the grid, in exports and on the
+  clipboard
+- `⌘C` copies the selected rows as TSV, through the same exporter the file export uses
 - Local query history and saved snippets
 
 **Browsing and changing data**
 - Tables open with **Data, Structure and DDL** tabs: columns, indexes, foreign keys, and
   the `CREATE` statement
-- **Editable grid.** Edits are held locally and applying them shows the exact `UPDATE` and
-  `DELETE` statements first. Every one keys on the complete primary key, a NULL key part
-  becomes `IS NULL`, and a table without a key is refused rather than guessed at
+- **Editable grid.** Add, change and delete rows. Edits are held locally and applying them
+  shows the exact `INSERT`, `UPDATE` and `DELETE` statements first. Every update and delete
+  keys on the complete primary key, a NULL key part becomes `IS NULL`, and a table without
+  a key is refused rather than guessed at. An added row sends only the columns you filled
+  in, so defaults and auto-increment still apply
 - **Dump and restore**: structure, data or both, streamed to disk so a table larger than
   RAM is fine; restore runs statement by statement and names the one that failed
 - **CSV import** with a preview and per-column mapping
@@ -127,6 +138,7 @@ src-tauri/src/
   connection_url.rs   Connection-string parsing and serialising
   sql/                Dialect quoting, statement splitter
   drivers/            The Driver trait, PostgreSQL, MySQL, SQLite and Redis
+  drivers/cancel.rs   Cancel handles, held outside the driver lock on purpose
   transfer/           Row editing, dump and restore, CSV, export
   ssh.rs              Tunnelling through the system ssh client
   storage/            Profiles, settings, history, OS credential store
@@ -154,6 +166,9 @@ Known and deliberate:
 - **No MongoDB or Firebase.**
 - **No schema editor.** Structure and DDL are read-only; changing a table means writing the
   `ALTER` yourself.
+- **Redis queries cannot be cancelled.** There is no Redis equivalent of `KILL QUERY` that
+  stops a command without dropping the connection, so the app says so rather than offering
+  a stop that does nothing.
 - **SSH tunnelling needs an `ssh` binary**, which macOS and Linux always have and Windows
   has shipped since Windows 10. Password authentication over SSH does not work on Windows,
   because its ssh.exe ignores `SSH_ASKPASS`; use a key or ssh-agent there.

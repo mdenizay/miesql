@@ -23,7 +23,11 @@ const en = {
   "general.copy": "Copy",
   "general.export": "Export",
   "general.run": "Run",
+  "general.runSelection": "Run Selection",
   "general.running": "Running…",
+  // Distinct from "Cancel": this stops work already under way rather than backing out
+  // of a dialog, and the two are different words in most languages.
+  "general.stop": "Stop",
   "general.rows": "rows",
   "general.row": "row",
   "general.none": "None",
@@ -232,7 +236,9 @@ const tr: Partial<Record<MessageKey, string>> = {
   "general.copy": "Kopyala",
   "general.export": "Dışa aktar",
   "general.run": "Çalıştır",
+  "general.runSelection": "Seçimi Çalıştır",
   "general.running": "Çalışıyor…",
+  "general.stop": "Durdur",
   "general.rows": "satır",
   "general.row": "satır",
   "general.none": "Yok",

@@ -23,6 +23,7 @@ import {
   PlayIcon,
   PowerIcon,
   ServerStackIcon,
+  StopIcon,
   TableCellsIcon,
   TrashIcon,
   XMarkIcon,
@@ -140,6 +141,10 @@ export function App() {
     onConfirm: () => void;
   } | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  // The text highlighted in the editor, so ⌘↩ and the Run button both run the selection
+  // when there is one — the standard way to try part of a longer script.
+  const [selectedSql, setSelectedSql] = useState("");
+  const [completionSchema, setCompletionSchema] = useState<Record<string, string[]>>({});
   const [namingSnippet, setNamingSnippet] = useState<string | null>(null);
 
   const t = useMemo(
@@ -375,7 +380,7 @@ export function App() {
   const run = useCallback(
     async (tab: Extract<Tab, { kind: "query" }>) => {
       if (!settings || tab.running) return;
-      const script = tab.sql.trim();
+      const script = (selectedSql.trim() || tab.sql).trim();
       if (!script) return;
 
       const profile = profiles.find((p) => p.id === tab.connectionId);
@@ -397,17 +402,101 @@ export function App() {
       }
       await execute(tab, script);
     },
-    [execute, profiles, settings, t],
+    [execute, profiles, selectedSql, settings, t],
   );
 
-  const completionSchema = useMemo(() => {
-    const schema: Record<string, string[]> = {};
-    if (!activeSession) return schema;
-    for (const tables of Object.values(activeSession.tables)) {
-      for (const table of tables) schema[table.name] = [];
+  const cancel = useCallback(
+    async (tab: Extract<Tab, { kind: "query" }>) => {
+      try {
+        await api.cancelQuery(tab.connectionId);
+      } catch (e) {
+        // The query itself reports what happened; this only covers the engines that
+        // cannot cancel at all.
+        setBanner(errorText(e));
+      }
+    },
+    [],
+  );
+
+  // Completion needs columns, not just table names, and one query per schema is what
+  // makes that affordable. It is a convenience, so a schema the user cannot read leaves
+  // completion thinner rather than showing an error.
+  useEffect(() => {
+    const database = activeSession?.info.currentDatabase;
+    if (!activeConnectionId || !database) {
+      setCompletionSchema({});
+      return;
     }
-    return schema;
-  }, [activeSession]);
+    let cancelled = false;
+    void (async () => {
+      const schemas = activeSession.schemas[database] ?? [""];
+      const merged: Record<string, string[]> = {};
+      for (const schema of schemas) {
+        const columns = await api
+          .schemaColumns(activeConnectionId, database, schema)
+          .catch(() => ({}) as Record<string, string[]>);
+        Object.assign(merged, columns);
+      }
+      // Tables the tree knows about but the column query did not cover still complete by
+      // name, which is better than dropping them.
+      for (const tables of Object.values(activeSession.tables)) {
+        for (const table of tables) merged[table.name] ??= [];
+      }
+      if (!cancelled) setCompletionSchema(merged);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConnectionId, activeSession]);
+
+  // The shortcuts a database client is expected to have. ⌘↩ belongs to the editor and is
+  // bound there; everything here is about the window rather than the text, so it is bound
+  // once on the window and deliberately ignores ⌘F, ⌘C and the rest, which mean something
+  // more specific inside the editor and the grid.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      const active = tabs.find((tab) => tab.id === activeTabId) ?? null;
+      switch (event.key) {
+        case "t":
+          if (activeConnectionId && sessions[activeConnectionId]) {
+            event.preventDefault();
+            newQueryTab(activeConnectionId);
+          }
+          return;
+        case "w":
+          if (active) {
+            event.preventDefault();
+            closeTab(active.id);
+          }
+          return;
+        case "n":
+          event.preventDefault();
+          setEditing({ profile: newProfile(), urlMode: false });
+          return;
+        case ",":
+          event.preventDefault();
+          setShowSettings(true);
+          return;
+        case "r":
+          if (activeConnectionId && sessions[activeConnectionId]) {
+            event.preventDefault();
+            void refreshTree(activeConnectionId);
+          }
+          return;
+        // ⌘. is the macOS convention for "stop what you are doing".
+        case ".":
+          if (active?.kind === "query" && active.running) {
+            event.preventDefault();
+            void cancel(active);
+          }
+          return;
+        default:
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeConnectionId, activeTabId, cancel, closeTab, newQueryTab, refreshTree, sessions, tabs]);
 
   const connectionMenu = useCallback(
     (profile: ConnectionProfile): MenuItem[] => {
@@ -696,6 +785,8 @@ export function App() {
             <TableTab
               key={activeTab.id}
               connectionId={activeTab.connectionId}
+              kind={activeProfile?.kind ?? "postgres"}
+              readOnly={activeProfile?.readOnly ?? false}
               table={activeTab.table}
               settings={settings}
               t={t}
@@ -708,8 +799,18 @@ export function App() {
               <div className="query-toolbar">
                 <button className="primary" disabled={queryTab.running} onClick={() => void run(queryTab)}>
                   <PlayIcon className="icon" />
-                  {queryTab.running ? t("general.running") : t("general.run")}
+                  {queryTab.running
+                    ? t("general.running")
+                    : selectedSql.trim()
+                      ? t("general.runSelection")
+                      : t("general.run")}
                 </button>
+                {queryTab.running && (
+                  <button className="danger" onClick={() => void cancel(queryTab)}>
+                    <StopIcon className="icon" />
+                    {t("general.stop")}
+                  </button>
+                )}
                 <span className="hint">⌘↩</span>
                 <button
                   disabled={!queryTab.sql.trim()}
@@ -733,6 +834,7 @@ export function App() {
                   value={queryTab.sql}
                   onChange={(sql) => patchTab(queryTab.id, { sql })}
                   onRun={() => void run(queryTab)}
+                  onSelectionChange={setSelectedSql}
                   kind={activeProfile?.kind ?? "postgres"}
                   fontSize={settings.editorFontSize}
                   showLineNumbers={settings.showLineNumbers}
@@ -764,7 +866,12 @@ export function App() {
                 )}
 
                 {result && result.columns.length > 0 ? (
-                  <ResultGrid columns={result.columns} rows={result.rows} fontSize={settings.gridFontSize} />
+                  <ResultGrid
+                    columns={result.columns}
+                    rows={result.rows}
+                    fontSize={settings.gridFontSize}
+                    kind={activeProfile?.kind ?? "postgres"}
+                  />
                 ) : (
                   <div className="empty">
                     <TableCellsIcon className="icon-xl" />

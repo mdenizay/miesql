@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { ArrowPathIcon, ExclamationTriangleIcon, LockClosedIcon } from "@heroicons/react/24/outline";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ArrowPathIcon, ExclamationTriangleIcon, LockClosedIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { api } from "../lib/api";
 import type { Translate } from "../lib/i18n";
 import { ResultGrid } from "./ResultGrid";
@@ -17,6 +17,10 @@ type Section = "data" | "structure" | "ddl";
 
 interface Props {
   connectionId: string;
+  kind: string;
+  /** From the profile. The backend refuses writes anyway; this keeps the UI from
+   *  offering an action that is going to be turned down. */
+  readOnly: boolean;
   table: TableRef;
   settings: AppSettings;
   t: Translate;
@@ -28,7 +32,7 @@ interface Props {
   }) => void;
 }
 
-export function TableTab({ connectionId, table, settings, t, onConfirm }: Props) {
+export function TableTab({ connectionId, kind, readOnly, table, settings, t, onConfirm }: Props) {
   const [section, setSection] = useState<Section>("data");
   const [details, setDetails] = useState<TableDetails | null>(null);
   const [ddl, setDdl] = useState("");
@@ -44,9 +48,24 @@ export function TableTab({ connectionId, table, settings, t, onConfirm }: Props)
   const [originals, setOriginals] = useState<Record<number, Record<string, SqlValue>>>({});
   const [deleted, setDeleted] = useState<Set<number>>(new Set());
   const [selection, setSelection] = useState<number[]>([]);
+  // Rows added here but not yet inserted. Their ids are negative so they can share the
+  // grid's id space with real rows without ever being mistaken for one.
+  const [addedIds, setAddedIds] = useState<number[]>([]);
 
   const editable = (details?.columns ?? []).some((c) => c.isPrimaryKey) && table.kind === "table";
+  // Appending needs no key — nothing has to be identified to add a row — so a keyless
+  // table can still be written to even though its existing rows cannot be edited.
+  const appendable = table.kind === "table" && !readOnly;
   const pendingCount = Object.keys(pending).length + deleted.size;
+
+  const displayRows = useMemo(() => {
+    if (!result) return [];
+    const blank = addedIds.map((id) => ({
+      id,
+      values: result.columns.map(() => ({ t: "null" }) as SqlValue),
+    }));
+    return [...result.rows, ...blank];
+  }, [result, addedIds]);
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -66,6 +85,7 @@ export function TableTab({ connectionId, table, settings, t, onConfirm }: Props)
       setPending({});
       setOriginals({});
       setDeleted(new Set());
+      setAddedIds([]);
       if (page === 0) {
         setTotal(await api.countRows(connectionId, table, filter).catch(() => 0));
       }
@@ -94,6 +114,15 @@ export function TableTab({ connectionId, table, settings, t, onConfirm }: Props)
   const recordEdit = useCallback(
     (rowId: number, column: string, value: SqlValue) => {
       if (!result) return;
+      // A row being added has nothing to compare against and no WHERE clause to build,
+      // so the typed value is simply kept.
+      if (rowId < 0) {
+        setPending((current) => ({
+          ...current,
+          [rowId]: { ...(current[rowId] ?? {}), [column]: value },
+        }));
+        return;
+      }
       const row = result.rows.find((r) => r.id === rowId);
       if (!row) return;
 
@@ -138,8 +167,13 @@ export function TableTab({ connectionId, table, settings, t, onConfirm }: Props)
 
   const apply = useCallback(async () => {
     const edits: RowEdit[] = [
+      // A row that was added but never typed into would become `INSERT INTO t () VALUES ()`,
+      // so it is dropped rather than sent as a statement no engine would accept.
+      ...addedIds
+        .filter((rowId) => Object.keys(pending[rowId] ?? {}).length > 0)
+        .map((rowId) => ({ kind: "insert" as const, rowId, values: pending[rowId] })),
       ...Object.entries(pending)
-        .filter(([rowId]) => !deleted.has(Number(rowId)))
+        .filter(([rowId]) => Number(rowId) >= 0 && !deleted.has(Number(rowId)))
         .map(([rowId, changes]) => ({
           kind: "update" as const,
           rowId: Number(rowId),
@@ -173,7 +207,7 @@ export function TableTab({ connectionId, table, settings, t, onConfirm }: Props)
     } catch (e) {
       setError(errorText(e));
     }
-  }, [connectionId, deleted, load, onConfirm, originals, pending, t, table]);
+  }, [addedIds, connectionId, deleted, load, onConfirm, originals, pending, t, table]);
 
   return (
     <>
@@ -193,7 +227,7 @@ export function TableTab({ connectionId, table, settings, t, onConfirm }: Props)
             {t("data.notEditable")}
           </span>
         )}
-        <span className="hint">{table.schema ? `.` : table.name}</span>
+        <span className="hint">{table.schema ? `${table.schema}.${table.name}` : table.name}</span>
       </div>
 
       {error && (
@@ -218,8 +252,15 @@ export function TableTab({ connectionId, table, settings, t, onConfirm }: Props)
                 }
               }}
             />
+            {appendable && (
+              <button onClick={() => setAddedIds((current) => [...current, -(current.length + 1)])}>
+                <PlusIcon className="icon" />
+                {t("data.addRow")}
+              </button>
+            )}
             {editable && (
               <button disabled={selection.length === 0} onClick={markDeleted}>
+                <TrashIcon className="icon" />
                 {t("data.deleteRows")}
               </button>
             )}
@@ -227,11 +268,13 @@ export function TableTab({ connectionId, table, settings, t, onConfirm }: Props)
 
           {result && <ResultGrid
             columns={result.columns}
-            rows={result.rows}
+            rows={displayRows}
             fontSize={settings.gridFontSize}
+            kind={kind}
             editable={editable}
             pending={pending}
             deleted={deleted}
+            added={new Set(addedIds)}
             onEdit={recordEdit}
             onSelectionChange={setSelection}
           />}
@@ -254,6 +297,7 @@ export function TableTab({ connectionId, table, settings, t, onConfirm }: Props)
                   onClick={() => {
                     setPending({});
                     setDeleted(new Set());
+                    setAddedIds([]);
                   }}
                 >
                   {t("general.discard")}

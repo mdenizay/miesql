@@ -4,6 +4,7 @@
 //! the grid, the exporters, the clipboard and the dumper on one code path, and it is why
 //! each driver uses its engine's *text* protocol where one exists.
 
+pub mod cancel;
 pub mod mysql;
 pub mod postgres;
 pub mod redis;
@@ -15,6 +16,7 @@ use crate::models::{
 };
 use crate::sql::dialect::Dialect;
 use async_trait::async_trait;
+pub use cancel::{CancelSlot, Canceller};
 
 /// What a driver needs to open a connection. The password is passed in rather than read
 /// from the credential store here, so the core stays testable and free of UI concerns.
@@ -35,6 +37,11 @@ pub trait Driver: Send {
     fn kind(&self) -> DatabaseKind;
     fn is_connected(&self) -> bool;
 
+    /// The slot this driver publishes its cancel handle into. The session keeps a second
+    /// reference so a running query can be stopped without waiting for the driver lock.
+    /// A driver that leaves the slot empty is one that cannot cancel.
+    fn cancel_slot(&self) -> CancelSlot;
+
     async fn connect(&mut self) -> DbResult<ServerInfo>;
     async fn disconnect(&mut self);
 
@@ -47,6 +54,21 @@ pub trait Driver: Send {
     async fn list_schemas(&mut self, database: &str) -> DbResult<Vec<String>>;
     async fn list_tables(&mut self, database: &str, schema: &str) -> DbResult<Vec<TableRef>>;
     async fn describe(&mut self, table: &TableRef) -> DbResult<TableDetails>;
+
+    /// Every column name in a schema, keyed by table, in one round trip.
+    ///
+    /// Editor completion needs the whole schema at once, and describing each table in
+    /// turn would be one query per table on a tree that routinely holds hundreds of them.
+    /// Only names are returned: completion has no use for types, and leaving them out
+    /// keeps this to a single cheap query. An engine with no columns to speak of returns
+    /// nothing rather than pretending.
+    async fn schema_columns(
+        &mut self,
+        _database: &str,
+        _schema: &str,
+    ) -> DbResult<std::collections::BTreeMap<String, Vec<String>>> {
+        Ok(Default::default())
+    }
     /// `CREATE TABLE` text for the DDL tab.
     async fn create_statement(&mut self, table: &TableRef) -> DbResult<String>;
     /// Switches the active database without reconnecting, where the engine allows it.
@@ -104,4 +126,25 @@ pub fn make_driver(credentials: Credentials) -> DbResult<Box<dyn Driver>> {
             other.display_name()
         ))),
     }
+}
+
+/// Folds a two-column `(table, column)` result into the map completion wants. Shared by
+/// the drivers because every one of them can express the question as exactly that shape.
+pub(crate) fn group_columns(
+    result: &QueryResult,
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut grouped: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for row in &result.rows {
+        let (Some(table), Some(column)) = (row.values.first(), row.values.get(1)) else {
+            continue;
+        };
+        if table.is_null() || column.is_null() {
+            continue;
+        }
+        grouped
+            .entry(table.as_str().to_string())
+            .or_default()
+            .push(column.as_str().to_string());
+    }
+    grouped
 }

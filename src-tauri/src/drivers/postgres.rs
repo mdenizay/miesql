@@ -5,17 +5,42 @@
 //! binary decoder the Swift version needed, and fixes its limitation where a query
 //! returning no rows showed no column headers.
 
-use super::{Credentials, Driver};
+use super::{CancelSlot, Canceller, Credentials, Driver};
 use crate::error::{DbError, DbResult};
 use crate::models::*;
 use crate::sql::{dialect, dialect::Dialect, splitter};
 use async_trait::async_trait;
-use tokio_postgres::{Client, Config, SimpleQueryMessage};
+use std::sync::Arc;
+use tokio_postgres::{CancelToken, Client, Config, SimpleQueryMessage};
 
 pub struct PostgresDriver {
     credentials: Credentials,
     client: Option<Client>,
     active_database: String,
+    cancel: CancelSlot,
+}
+
+/// PostgreSQL cancels a query over a *second* connection carrying the backend's key, which
+/// is why this holds no reference to the client it stops: the busy connection is not the
+/// one the request travels on.
+struct PostgresCanceller {
+    token: CancelToken,
+    encrypted: bool,
+}
+
+#[async_trait]
+impl Canceller for PostgresCanceller {
+    async fn cancel(&self) -> DbResult<()> {
+        if self.encrypted {
+            let tls = crate::tls::postgres_connector()?;
+            self.token.cancel_query(tls).await.map_err(map_error)
+        } else {
+            self.token
+                .cancel_query(tokio_postgres::NoTls)
+                .await
+                .map_err(map_error)
+        }
+    }
 }
 
 impl PostgresDriver {
@@ -25,6 +50,7 @@ impl PostgresDriver {
             credentials,
             client: None,
             active_database,
+            cancel: CancelSlot::default(),
         }
     }
 
@@ -78,6 +104,12 @@ impl PostgresDriver {
             client
         };
 
+        // Republished on every open: switching database builds a new backend, and the
+        // previous key would cancel a connection that no longer exists.
+        self.cancel.set(Arc::new(PostgresCanceller {
+            token: client.cancel_token(),
+            encrypted: profile.ssl_mode != SslMode::Disable,
+        }));
         self.client = Some(client);
         self.active_database = database.to_string();
         Ok(())
@@ -164,6 +196,10 @@ impl Driver for PostgresDriver {
         self.client.as_ref().is_some_and(|c| !c.is_closed())
     }
 
+    fn cancel_slot(&self) -> CancelSlot {
+        self.cancel.clone()
+    }
+
     async fn connect(&mut self) -> DbResult<ServerInfo> {
         let database = if self.active_database.is_empty() {
             "postgres".to_string()
@@ -195,6 +231,7 @@ impl Driver for PostgresDriver {
     }
 
     async fn disconnect(&mut self) {
+        self.cancel.clear();
         self.client = None;
     }
 
@@ -401,6 +438,22 @@ impl Driver for PostgresDriver {
     }
 
     /// PostgreSQL has no `SHOW CREATE TABLE`, so the DDL is rebuilt from the catalog.
+    async fn schema_columns(
+        &mut self,
+        database: &str,
+        schema: &str,
+    ) -> DbResult<std::collections::BTreeMap<String, Vec<String>>> {
+        self.use_database(database).await?;
+        let literal = Dialect::new(DatabaseKind::Postgres).string_literal(schema);
+        let rows = self
+            .run_single(&format!(
+                "SELECT table_name, column_name FROM information_schema.columns \
+                 WHERE table_schema = {literal} ORDER BY table_name, ordinal_position"
+            ))
+            .await?;
+        Ok(super::group_columns(&rows))
+    }
+
     async fn create_statement(&mut self, table: &TableRef) -> DbResult<String> {
         let dialect = Dialect::new(DatabaseKind::Postgres);
         let details = self.describe(table).await?;

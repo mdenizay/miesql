@@ -194,6 +194,21 @@ pub async fn execute_sql(
     Ok(results)
 }
 
+/// Stops the query running on a connection.
+///
+/// Deliberately does not take the driver lock: that lock is held by the query being
+/// cancelled, so waiting for it would mean waiting for the thing the user is trying to
+/// stop. The cancelled query returns its own error to whoever called `execute_sql`.
+#[tauri::command]
+pub async fn cancel_query(state: State<'_, AppState>, id: Uuid) -> R<()> {
+    let session = state.get(id).await?;
+    let canceller = session.cancel.get().ok_or_else(|| {
+        crate::error::DbError::new("This connection cannot cancel a running query.")
+    })?;
+    canceller.cancel().await?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn list_databases(state: State<'_, AppState>, id: Uuid) -> R<Vec<String>> {
     let session = state.get(id).await?;
@@ -222,6 +237,20 @@ pub async fn list_tables(
     let session = state.get(id).await?;
     let mut driver = session.driver.lock().await;
     driver.list_tables(&database, &schema).await
+}
+
+/// Feeds editor completion. Failures are the caller's to swallow: completion is a
+/// convenience, and a schema the user cannot read should not stop them writing SQL.
+#[tauri::command]
+pub async fn schema_columns(
+    state: State<'_, AppState>,
+    id: Uuid,
+    database: String,
+    schema: String,
+) -> R<std::collections::BTreeMap<String, Vec<String>>> {
+    let session = state.get(id).await?;
+    let mut driver = session.driver.lock().await;
+    driver.schema_columns(&database, &schema).await
 }
 
 #[tauri::command]

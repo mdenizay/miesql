@@ -5,19 +5,43 @@
 //! That gives the same two properties the PostgreSQL driver has: no per-type decoding to
 //! keep correct, and column headers for a query that returns nothing.
 
-use super::{Credentials, Driver};
+use super::{CancelSlot, Canceller, Credentials, Driver};
 use crate::error::{DbError, DbResult};
 use crate::models::*;
 use crate::sql::{dialect, dialect::Dialect, splitter};
 use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
-use mysql_async::{Conn, OptsBuilder, SslOpts, Value};
+use mysql_async::{Conn, Opts, OptsBuilder, SslOpts, Value};
+use std::sync::Arc;
 
 pub struct MySqlDriver {
     credentials: Credentials,
     conn: Option<Conn>,
     active_database: String,
     kind: DatabaseKind,
+    cancel: CancelSlot,
+}
+
+/// MySQL has no out-of-band cancel: the only way to stop a running statement is to log in
+/// again and `KILL QUERY` the busy connection by its id. `KILL QUERY` — rather than plain
+/// `KILL` — ends the statement and leaves the session alive, so the user keeps their
+/// temporary tables, transaction and selected database.
+struct MySqlCanceller {
+    opts: Opts,
+    connection_id: u32,
+}
+
+#[async_trait]
+impl Canceller for MySqlCanceller {
+    async fn cancel(&self) -> DbResult<()> {
+        let mut conn = Conn::new(self.opts.clone()).await.map_err(map_error)?;
+        let result = conn
+            .query_drop(format!("KILL QUERY {}", self.connection_id))
+            .await
+            .map_err(map_error);
+        let _ = conn.disconnect().await;
+        result
+    }
 }
 
 impl MySqlDriver {
@@ -29,6 +53,7 @@ impl MySqlDriver {
             conn: None,
             active_database,
             kind,
+            cancel: CancelSlot::default(),
         }
     }
 
@@ -131,6 +156,10 @@ impl Driver for MySqlDriver {
         self.conn.is_some()
     }
 
+    fn cancel_slot(&self) -> CancelSlot {
+        self.cancel.clone()
+    }
+
     async fn connect(&mut self) -> DbResult<ServerInfo> {
         let profile = &self.credentials.profile;
 
@@ -155,8 +184,11 @@ impl Driver for MySqlDriver {
 
         // OptsBuilder has no connect timeout, so the whole attempt is bounded here. That
         // also covers the TLS handshake, which is where an unreachable host usually stalls.
+        // Kept as `Opts` rather than the builder so the canceller can open its own
+        // connection with exactly the settings this one used.
+        let opts = Opts::from(builder);
         let timeout = std::time::Duration::from_secs(profile.connect_timeout_seconds.max(1));
-        let conn = tokio::time::timeout(timeout, Conn::new(builder))
+        let conn = tokio::time::timeout(timeout, Conn::new(opts.clone()))
             .await
             .map_err(|_| {
                 DbError::new(format!(
@@ -165,6 +197,10 @@ impl Driver for MySqlDriver {
                 ))
             })?
             .map_err(map_error)?;
+        self.cancel.set(Arc::new(MySqlCanceller {
+            opts,
+            connection_id: conn.id(),
+        }));
         self.conn = Some(conn);
 
         let version = self
@@ -193,6 +229,7 @@ impl Driver for MySqlDriver {
     }
 
     async fn disconnect(&mut self) {
+        self.cancel.clear();
         if let Some(conn) = self.conn.take() {
             let _ = conn.disconnect().await;
         }
@@ -400,6 +437,22 @@ impl Driver for MySqlDriver {
                 .map(|v| v.as_str().to_string())
                 .filter(|c| !c.is_empty()),
         })
+    }
+
+    async fn schema_columns(
+        &mut self,
+        database: &str,
+        _schema: &str,
+    ) -> DbResult<std::collections::BTreeMap<String, Vec<String>>> {
+        // MySQL has no schema level, so the database is the schema.
+        let literal = Dialect::new(self.kind).string_literal(database);
+        let rows = self
+            .run_single(&format!(
+                "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS \
+                 WHERE TABLE_SCHEMA = {literal} ORDER BY TABLE_NAME, ORDINAL_POSITION"
+            ))
+            .await?;
+        Ok(super::group_columns(&rows))
     }
 
     async fn create_statement(&mut self, table: &TableRef) -> DbResult<String> {

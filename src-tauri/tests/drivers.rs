@@ -646,3 +646,159 @@ async fn redis_read_only_blocks_writes_but_not_reads() {
 
     driver.disconnect().await;
 }
+
+/// Cancelling has to work while the query is still running, which is the whole point:
+/// the driver is borrowed by `execute` for the entire call, so the handle has to come
+/// from somewhere else. A recursive CTE with no natural end gives a query that will not
+/// finish on its own, so if the test returns at all, the interrupt is what ended it.
+#[tokio::test(flavor = "multi_thread")]
+async fn sqlite_cancels_a_running_query() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut driver = sqlite_driver(&dir, "cancel.sqlite").await;
+    let cancel = driver.cancel_slot();
+
+    let canceller = cancel.get().expect("SQLite publishes a cancel handle");
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        canceller.cancel().await.expect("cancel");
+    });
+
+    let started = std::time::Instant::now();
+    let outcome = driver
+        .execute(
+            "WITH RECURSIVE forever(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM forever) \
+             SELECT count(*) FROM forever",
+        )
+        .await;
+
+    assert!(outcome.is_err(), "the query should have been interrupted");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(20),
+        "the interrupt should stop the query promptly, not eventually"
+    );
+
+    // The connection stays usable: cancelling a statement is not disconnecting.
+    let after = driver.execute("SELECT 1").await.expect("still connected");
+    assert_eq!(after[0].rows.len(), 1);
+}
+
+/// A connection with nothing to cancel still answers, rather than the command failing in
+/// a way the UI would have to special-case.
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_an_idle_connection_is_harmless() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut driver = sqlite_driver(&dir, "idle.sqlite").await;
+    driver.cancel_slot().get().unwrap().cancel().await.unwrap();
+    driver.execute("SELECT 1").await.expect("unaffected");
+}
+
+/// PostgreSQL cancels over a second connection carrying the backend key, so unlike SQLite
+/// this exercises real network behaviour — and proves the key stays valid for the session
+/// rather than only for the statement it was taken during.
+#[tokio::test(flavor = "multi_thread")]
+async fn postgres_cancels_a_running_query() {
+    let Some(credentials) = postgres_credentials() else {
+        eprintln!("skipping: MIESQL_TEST_PG_URL is not set");
+        return;
+    };
+    let mut driver = make_driver(credentials).unwrap();
+    driver.connect().await.expect("connect");
+
+    let canceller = driver
+        .cancel_slot()
+        .get()
+        .expect("PostgreSQL publishes a cancel handle");
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        canceller.cancel().await.expect("cancel");
+    });
+
+    let started = std::time::Instant::now();
+    let outcome = driver.execute("SELECT pg_sleep(30)").await;
+
+    assert!(outcome.is_err(), "the query should have been cancelled");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "cancelling should not wait for the query to end on its own"
+    );
+    // The session survives: `pg_cancel_backend` semantics, not `pg_terminate_backend`.
+    let after = driver.execute("SELECT 1").await.expect("still connected");
+    assert_eq!(after[0].rows.len(), 1);
+}
+
+/// MySQL has no out-of-band cancel, so this proves the `KILL QUERY` path: a second login
+/// ends the statement while leaving the session alive.
+#[tokio::test(flavor = "multi_thread")]
+async fn mysql_cancels_a_running_query() {
+    let Some(credentials) = mysql_credentials() else {
+        eprintln!("skipping: MIESQL_TEST_MYSQL_URL is not set");
+        return;
+    };
+    let mut driver = make_driver(credentials).unwrap();
+    driver.connect().await.expect("connect");
+
+    let canceller = driver
+        .cancel_slot()
+        .get()
+        .expect("MySQL publishes a cancel handle");
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        canceller.cancel().await.expect("cancel");
+    });
+
+    let started = std::time::Instant::now();
+    let outcome = driver.execute("SELECT SLEEP(30)").await;
+
+    assert!(outcome.is_err(), "the query should have been killed");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "KILL QUERY should land while the statement is still running"
+    );
+    let after = driver.execute("SELECT 1").await.expect("still connected");
+    assert_eq!(after[0].rows.len(), 1);
+}
+
+/// Completion is only useful if it knows columns, not just table names, and only cheap if
+/// the whole schema arrives at once.
+#[tokio::test(flavor = "multi_thread")]
+async fn sqlite_lists_every_column_in_the_schema_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut driver = sqlite_driver(&dir, "columns.sqlite").await;
+    seed(&mut driver).await;
+
+    let columns = driver.schema_columns("main", "").await.expect("columns");
+    assert_eq!(
+        columns.get("users").map(Vec::as_slice),
+        Some(
+            ["id", "name", "email", "age", "balance", "bio"]
+                .map(String::from)
+                .as_slice()
+        ),
+        "columns come back in declaration order"
+    );
+    assert!(columns.contains_key("orders"), "every table is covered");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn postgres_lists_every_column_in_the_schema_at_once() {
+    let Some(credentials) = postgres_credentials() else {
+        eprintln!("skipping: MIESQL_TEST_PG_URL is not set");
+        return;
+    };
+    let mut driver = make_driver(credentials).unwrap();
+    let info = driver.connect().await.expect("connect");
+    driver
+        .execute("DROP TABLE IF EXISTS completion_probe; CREATE TABLE completion_probe (id int, label text)")
+        .await
+        .expect("seed");
+
+    let columns = driver
+        .schema_columns(&info.current_database, "public")
+        .await
+        .expect("columns");
+    assert_eq!(
+        columns.get("completion_probe").map(Vec::as_slice),
+        Some(["id", "label"].map(String::from).as_slice())
+    );
+    driver.execute("DROP TABLE completion_probe").await.ok();
+}

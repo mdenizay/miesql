@@ -4,7 +4,7 @@
 //! blocks another — the same property the Swift version got from one actor per connection.
 //! A single map-wide lock would have serialised every connection behind the slowest one.
 
-use crate::drivers::Driver;
+use crate::drivers::{CancelSlot, Driver};
 use crate::error::{DbError, DbResult};
 use crate::models::ServerInfo;
 use std::collections::HashMap;
@@ -14,6 +14,9 @@ use uuid::Uuid;
 
 pub struct Session {
     pub driver: Mutex<Box<dyn Driver>>,
+    /// Outside the driver lock on purpose: a query that is running holds that lock, so
+    /// this is the only way to reach the connection while it is busy.
+    pub cancel: CancelSlot,
     pub info: ServerInfo,
     /// Held for the life of the session: dropping it closes the forward, so the tunnel
     /// cannot outlive the connection that needed it.
@@ -34,6 +37,7 @@ impl AppState {
         tunnel: Option<crate::ssh::SshTunnel>,
     ) {
         let session = Arc::new(Session {
+            cancel: driver.cancel_slot(),
             driver: Mutex::new(driver),
             info,
             tunnel,
