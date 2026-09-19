@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, tauri-rewrite]
   pull_request:
   workflow_dispatch:
 
@@ -10,38 +10,136 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  build-and-test:
-    name: Build and test
-    runs-on: macos-15
+  rust:
+    name: Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-22.04, windows-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - name: Show toolchain
+      # Tauri needs the WebKitGTK development headers to compile on Linux. Nothing here is
+      # needed at runtime by the packaged app beyond the libraries the .deb depends on.
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-22.04'
         run: |
-          swift --version
-          xcodebuild -version
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
+            gnome-keyring dbus-x11
 
-      - name: Cache SwiftPM dependencies
-        uses: actions/cache@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          path: .build
-          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
-          restore-keys: ${{ runner.os }}-spm-
+          components: clippy, rustfmt
 
-      - name: Build
-        run: swift build -c release
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
 
+      - name: Formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+      - name: Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      # The SQLite cases run everywhere; the PostgreSQL ones skip themselves unless a
+      # server is configured, so the matrix stays fast and self-contained.
       - name: Test
-        run: swift test
+        if: matrix.os != 'ubuntu-22.04'
+        run: cargo test --manifest-path src-tauri/Cargo.toml
 
-      - name: Assemble app bundle
-        run: ./Scripts/bundle-app.sh release
+      # Linux keeps passwords in the Secret Service, which a headless runner does not have.
+      # Starting an unlocked keyring means the credential path is covered here rather than
+      # skipped on every run — it is the platform most likely to lack one in the wild.
+      - name: Test (with a Secret Service)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          dbus-run-session -- bash -c '
+            echo "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1
+            cargo test --manifest-path src-tauri/Cargo.toml
+          '
 
-      - name: Upload app bundle
-        uses: actions/upload-artifact@v4
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
         with:
-          name: MieSQL-app
-          path: build/MieSQL.app
-          if-no-files-found: error
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # `npm run build` type-checks with tsc before Vite bundles, so a type error fails here.
+      - run: npm run build
+
+  integration:
+    name: Database integration
+    runs-on: ubuntu-22.04
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: miesql
+          POSTGRES_DB: miesql_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      mysql:
+        image: mysql:9
+        env:
+          MYSQL_ROOT_PASSWORD: miesql
+          MYSQL_DATABASE: miesql_test
+          MYSQL_USER: miesql
+          MYSQL_PASSWORD: sifre123
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -pmiesql"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:8
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev gnome-keyring dbus-x11
+
+      - name: Test against a real server
+        env:
+          MIESQL_TEST_PG_URL: postgres://postgres:miesql@127.0.0.1:5432/miesql_test?sslmode=disable
+          MIESQL_TEST_PG: host=127.0.0.1 port=5432 user=postgres password=miesql dbname=miesql_test
+          # MySQL 9 accounts default to caching_sha2_password, which cannot authenticate
+          # over a plaintext socket — so this URL also exercises the TLS path.
+          MIESQL_TEST_MYSQL_URL: mysql://miesql:sifre123@127.0.0.1:3306/miesql_test?sslmode=require
+          # The Redis tests write only under their own prefix and clean up after themselves.
+          MIESQL_TEST_REDIS_URL: redis://127.0.0.1:6379/15?sslmode=disable
+          PGPASSWORD: miesql
+        run: |
+          psql -h 127.0.0.1 -U postgres -d miesql_test -v ON_ERROR_STOP=1 \
+            -f src-tauri/tests/fixtures/pg-probe.sql
+          mysql -h 127.0.0.1 -P 3306 -u miesql -psifre123 miesql_test \
+            < src-tauri/tests/fixtures/mysql-probe.sql
+          dbus-run-session -- bash -c '
+            echo "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1
+            cargo test --manifest-path src-tauri/Cargo.toml
+          '

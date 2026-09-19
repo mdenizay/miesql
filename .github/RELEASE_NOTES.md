@@ -1,61 +1,51 @@
-A fast, native SQL client for macOS — an open-source alternative to Navicat.
+MieSQL 1.0 — a fast, cross-platform SQL client for PostgreSQL, MySQL, MariaDB, SQLite and
+Redis. Everything stays on your machine.
 
-This is the first tagged build. It covers the core workflow for **PostgreSQL, MySQL,
-MariaDB and SQLite**: many connections at once, a SQL editor with highlighting and
-schema-aware completion, a virtualised result grid you can edit, structure and DDL views,
-`.sql` dump and restore, CSV import, and CSV/JSON/SQL/Markdown export. Light and dark,
-English and Turkish, both switchable at runtime.
+## New in 1.0
 
-Everything stays on your Mac. Passwords go to the Keychain; nothing else leaves the
-machine except the queries you send to your own databases.
+**Stop a running query.** The one thing a SQL client cannot be without. PostgreSQL cancels
+over its own protocol, MySQL and MariaDB through `KILL QUERY` on a second login, SQLite by
+interrupt. The session survives in every case, so you keep your transaction, your
+temporary tables and your selected database. Redis has no way to stop a command without
+dropping the connection, and the app says so rather than offering a button that does
+nothing.
+
+**Add rows in the grid.** Alongside editing and deleting. An added row sends only the
+columns you filled in, so defaults and auto-increment still apply, and — as with every
+other edit — you see the exact `INSERT` before it runs.
+
+**Completion knows your columns**, not just your table names. One query per schema, so it
+stays cheap on a database with hundreds of tables.
+
+**Run the selection.** `⌘↩` runs the highlighted text when there is a selection and the
+whole script otherwise. `⌘F` searches the editor, `⌘C` copies the selected rows as TSV,
+and `⌘T` `⌘W` `⌘N` `⌘R` `⌘,` `⌘.` cover tabs, connections, refresh, settings and stop.
+
+## Fixed
+
+- **Typing into a NULL cell produced `NULLwhatever you typed`.** The editor opened
+  pre-filled with the literal word `NULL` and typing appended to it. Cells now open empty
+  with `NULL` as the placeholder, and leaving one empty keeps it NULL rather than silently
+  writing an empty string — the two are not the same value.
+- **A second query tab shared the first one's editor handlers**, so typing in one tab
+  wrote into the other tab's text.
+- The table header showed a bare `.` instead of `schema.table`.
+
+## Also
+
+The unused `mongodb` dependency is gone, and the Swift sources the Tauri rewrite replaced
+have been removed — they remain at the `v0.1.0` tag.
 
 ## Install
 
-Download the zip, unpack it, and move `MieSQL.app` to `/Applications`.
+| Platform | File |
+| --- | --- |
+| macOS (Apple Silicon and Intel) | `MieSQL_1.0.0_universal.dmg` |
+| Windows | `MieSQL_1.0.0_x64-setup.exe` |
+| Linux | `.AppImage`, `.deb` or `.rpm` |
 
-**The app is not signed with a Developer ID and is not notarised**, because that needs a
-paid Apple Developer account. macOS will therefore refuse to open it on the first try —
-this is Gatekeeper doing its job on an unidentified developer, not a fault in the download.
+macOS is signed with a Developer ID and notarised, so it opens with no warning. The
+Windows installer is unsigned — SmartScreen will ask; choose **More info → Run anyway**.
+It installs for the current user and needs no administrator rights.
 
-To open it anyway, either remove the quarantine flag:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/MieSQL.app
-```
-
-…or launch it once, then go to **System Settings → Privacy & Security**, find the blocked
-MieSQL entry, and choose **Open Anyway**.
-
-If you would rather not trust a binary from a stranger — a reasonable position — build it
-yourself instead; it takes about a minute:
-
-```bash
-git clone https://github.com/mdenizay/miesql.git
-cd miesql
-./Scripts/bundle-app.sh release
-open build/MieSQL.app
-```
-
-Verify the download against `SHA256SUMS.txt` if you do use the zip.
-
-## Requirements
-
-macOS 14 (Sonoma) or later. The binary is universal: Apple Silicon and Intel.
-
-## Known limitations
-
-These are deliberate for a first release, not oversights:
-
-- **No SSH tunnelling.** Use a local `ssh -L` tunnel and connect to `127.0.0.1`.
-- **No Redis, MongoDB or Firebase.** The driver protocol assumes a relational shape.
-- **A PostgreSQL query returning zero rows shows no column headers**, because PostgresNIO
-  does not expose the row description separately from the rows. Table browsing is
-  unaffected — it reads columns from the catalog.
-- **MySQL 8 accounts using `caching_sha2_password` need SSL set to Prefer or Require.**
-  That handshake cannot complete over a plaintext socket.
-- **Certificate validation is not implemented.** `sslmode=verify-ca` and `verify-full` are
-  accepted but downgraded to Require, and the app says so rather than pretending.
-- **No schema editor**, and no UI for stored procedures, triggers or users.
-
-Bug reports and pull requests are welcome:
-https://github.com/mdenizay/miesql/issues
+If you already have MieSQL, it will offer this update at launch.

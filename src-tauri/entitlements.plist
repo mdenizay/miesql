@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The hardened runtime is required for notarization, and it blocks a few things by
+         default that a database client legitimately needs. Only those are re-enabled; the
+         app is deliberately not sandboxed, because it has to reach arbitrary hosts and
+         open database files anywhere the user points it. -->
+
+    <!-- WebKit compiles JavaScript at runtime. Without this the interface does not load. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!-- Connecting to database servers. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+</dict>
+</plist>
